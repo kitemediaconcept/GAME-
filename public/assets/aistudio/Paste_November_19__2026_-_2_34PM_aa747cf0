@@ -1,0 +1,837 @@
+// ============================================================
+//  SOCCER GAME — single-file JS
+//  Modes: KICKER     — shoot against AI keeper
+//         GOALKEEPER — react and block incoming shots
+// ============================================================
+
+// ─── 1. SCENE ────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x4a6fa5);
+
+// Camera look-at is stored as a plain object so gsap can tween it
+const camLookAt = { x: 0, y: 0, z: -10 };
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(0, 3, 7);
+camera.lookAt(camLookAt.x, camLookAt.y, camLookAt.z);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+// ─── 2. LIGHTING ─────────────────────────────────────────────
+scene.add(new THREE.HemisphereLight(0xd0e8ff, 0x2d5a20, 0.55));
+
+const keyLight = new THREE.DirectionalLight(0xfff4e0, 1.1);
+keyLight.position.set(8, 20, 12);
+keyLight.castShadow = true;
+keyLight.shadow.mapSize.set(2048, 2048);
+Object.assign(keyLight.shadow.camera, { near:0.5, far:80, left:-30, right:30, top:30, bottom:-30 });
+keyLight.shadow.bias = -0.001;
+scene.add(keyLight);
+
+const fillLight = new THREE.DirectionalLight(0xaad4ff, 0.4);
+fillLight.position.set(-6, 10, 4);
+scene.add(fillLight);
+
+// ─── 3. CONSTANTS ────────────────────────────────────────────
+const GOAL_W = 12, GOAL_H = 4, GOAL_D = 2.5;
+const GOAL_Z = -15, BACK_Z = GOAL_Z - GOAL_D;
+const AIM_RANGE          = GOAL_W / 2 + 2.5;   // ±8.5 — aim cursor range
+const CURVE_WINDOW_LOW   = 0.45;
+const CURVE_WINDOW_HIGH  = 0.55;
+
+// Camera presets — tweened on mode switch
+const CAM_KICKER = { px:0, py:3,  pz:7,   lx:0, ly:0,   lz:-10 };
+const CAM_GK     = { px:0, py:7,   pz:-21, lx:0, ly:1.0, lz:-8  };
+
+// ─── 4. PITCH ────────────────────────────────────────────────
+const pitch = new THREE.Mesh(
+  new THREE.PlaneGeometry(50, 50),
+  new THREE.MeshLambertMaterial({ color: 0x1e5c28 })
+);
+pitch.rotation.x = -Math.PI / 2;
+pitch.receiveShadow = true;
+scene.add(pitch);
+
+const stripeMat = new THREE.MeshLambertMaterial({ color: 0x236b2f, transparent: true, opacity: 0.4 });
+for (let i = 0; i < 5; i++) {
+  const stripe = new THREE.Mesh(new THREE.PlaneGeometry(50, 5), stripeMat);
+  stripe.rotation.x = -Math.PI / 2;
+  stripe.position.set(0, 0.001, -12.5 + i * 10);
+  scene.add(stripe);
+}
+
+// ─── 5. GOAL ─────────────────────────────────────────────────
+const goalGroup    = new THREE.Group();
+const postMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4, metalness: 0.2 });
+
+function makePost(w, h, d, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), postMaterial);
+  m.position.set(x, y, z);
+  m.castShadow = m.receiveShadow = true;
+  return m;
+}
+goalGroup.add(makePost(0.2, GOAL_H, 0.2, -GOAL_W/2, GOAL_H/2, GOAL_Z));
+goalGroup.add(makePost(0.2, GOAL_H, 0.2,  GOAL_W/2, GOAL_H/2, GOAL_Z));
+goalGroup.add(makePost(0.2, GOAL_H, 0.2, -GOAL_W/2, GOAL_H/2, BACK_Z));
+goalGroup.add(makePost(0.2, GOAL_H, 0.2,  GOAL_W/2, GOAL_H/2, BACK_Z));
+goalGroup.add(makePost(GOAL_W+0.2, 0.2, 0.2, 0, GOAL_H, GOAL_Z));
+goalGroup.add(makePost(GOAL_W+0.2, 0.2, 0.2, 0, GOAL_H, BACK_Z));
+goalGroup.add(makePost(0.2, 0.2, GOAL_D, -GOAL_W/2, GOAL_H, GOAL_Z-GOAL_D/2));
+goalGroup.add(makePost(0.2, 0.2, GOAL_D,  GOAL_W/2, GOAL_H, GOAL_Z-GOAL_D/2));
+goalGroup.add(makePost(0.2, 0.2, GOAL_D, -GOAL_W/2, 0.1,    GOAL_Z-GOAL_D/2));
+goalGroup.add(makePost(0.2, 0.2, GOAL_D,  GOAL_W/2, 0.1,    GOAL_Z-GOAL_D/2));
+
+const netMaterial = new THREE.MeshLambertMaterial({
+  color: 0xdddddd, transparent: true, opacity: 0.5, side: THREE.DoubleSide, wireframe: true
+});
+const backNetGeometry = new THREE.PlaneGeometry(GOAL_W, GOAL_H, 28, 14);
+const backNetMesh = new THREE.Mesh(backNetGeometry, netMaterial);
+backNetMesh.position.set(0, GOAL_H/2, BACK_Z);
+goalGroup.add(backNetMesh);
+
+[[Math.PI/2, -GOAL_W/2], [-Math.PI/2, GOAL_W/2]].forEach(([ry, px]) => {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(GOAL_D, GOAL_H, 8, 10), netMaterial);
+  m.rotation.y = ry;
+  m.position.set(px, GOAL_H/2, GOAL_Z-GOAL_D/2);
+  goalGroup.add(m);
+});
+const topNet = new THREE.Mesh(new THREE.PlaneGeometry(GOAL_W, GOAL_D, 20, 8), netMaterial);
+topNet.rotation.x = Math.PI/2;
+topNet.position.set(0, GOAL_H, GOAL_Z-GOAL_D/2);
+goalGroup.add(topNet);
+scene.add(goalGroup);
+
+// ─── 6. STADIUM + FANS ───────────────────────────────────────
+const skyQuad = new THREE.Mesh(new THREE.PlaneGeometry(120, 40), new THREE.MeshBasicMaterial({ color: 0x3a5f8a }));
+skyQuad.position.set(0, 18, -38);
+scene.add(skyQuad);
+
+const standMat = new THREE.MeshLambertMaterial({ color: 0x2a2a2e });
+for (let tier = 0; tier < 5; tier++) {
+  const s = new THREE.Mesh(new THREE.BoxGeometry(54-tier*1.5, 1.2, 2.2), standMat);
+  s.position.set(0, 1.5+tier*1.8, -20-tier*2.1);
+  scene.add(s);
+}
+for (let side = -1; side <= 1; side += 2) {
+  for (let tier = 0; tier < 4; tier++) {
+    const s = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 54-tier*2), standMat);
+    s.position.set(side*(26+tier*2.1), 1.5+tier*1.8, -8);
+    scene.add(s);
+  }
+}
+const roof = new THREE.Mesh(new THREE.BoxGeometry(58, 0.5, 8), new THREE.MeshLambertMaterial({ color: 0x1e1e22 }));
+roof.position.set(0, 12, -26);
+scene.add(roof);
+
+const pylonMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+const floodMat = new THREE.MeshBasicMaterial({ color: 0xfffce0 });
+[[-22,-22],[22,-22],[-22,5],[22,5]].forEach(([px,pz]) => {
+  const p = new THREE.Mesh(new THREE.BoxGeometry(0.4,12,0.4), pylonMat);
+  p.position.set(px, 6, pz);
+  scene.add(p);
+  const h = new THREE.Mesh(new THREE.BoxGeometry(2,0.3,1), floodMat);
+  h.position.set(px, 12.2, pz);
+  scene.add(h);
+});
+
+const FAN_COLORS = [0xe63946,0xf4a261,0x2a9d8f,0xe9c46a,0x264653,0x6d6875,0xffffff,0xadb5bd,0xd62828,0x023e8a];
+const fans = [];
+for (let tier = 0; tier < 5; tier++) {
+  const y=2.2+tier*1.8, z=-19.5-tier*2.1, n=Math.floor(48/0.65);
+  for (let i=0;i<n;i++) {
+    const f=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.75,0.18),new THREE.MeshBasicMaterial({color:FAN_COLORS[Math.floor(Math.random()*10)]}));
+    f.position.set(-24+0.3+i*0.65,y,z); f._phase=Math.random()*Math.PI*2; f._baseY=y; f._amplitude=0.04+Math.random()*0.06;
+    scene.add(f); fans.push(f);
+  }
+}
+for (let side=-1;side<=1;side+=2) {
+  for (let tier=0;tier<4;tier++) {
+    const x=side*(27.2+tier*2.1),y=2.2+tier*1.8,n=Math.floor(44/0.65);
+    for (let i=0;i<n;i++) {
+      const f=new THREE.Mesh(new THREE.BoxGeometry(0.18,0.75,0.55),new THREE.MeshBasicMaterial({color:FAN_COLORS[Math.floor(Math.random()*10)]}));
+      f.position.set(x,y,10-i*0.65); f._phase=Math.random()*Math.PI*2; f._baseY=y; f._amplitude=0.04+Math.random()*0.06;
+      scene.add(f); fans.push(f);
+    }
+  }
+}
+
+// ─── 7. BALL ─────────────────────────────────────────────────
+const ball = new THREE.Group();
+(function () {
+  const whiteMat = new THREE.MeshStandardMaterial({ color:0xf0ede8, roughness:0.72, metalness:0 });
+  const blackMat = new THREE.MeshStandardMaterial({ color:0x1a1a1a, roughness:0.85, metalness:0 });
+  const s=0.101, lw=0.007, phi=(1+Math.sqrt(5))/2;
+  const ba=0,bb=s,bc=2*s,bd=phi*s,be=3*bd,bf=(1+2*phi)*s,bg=(2+phi)*s,bh=2*phi*s;
+  const cords=[
+    [+ba,+bb,+be],[+ba,+bb,-be],[+ba,-bb,+be],[+ba,-bb,-be],[+bb,+be,+ba],[+bb,-be,+ba],
+    [-bb,+be,+ba],[-bb,-be,+ba],[+be,+ba,+bb],[-be,+ba,+bb],[+be,+ba,-bb],[-be,+ba,-bb],
+    [+bc,+bf,+bd],[+bc,+bf,-bd],[+bc,-bf,+bd],[-bc,+bf,+bd],[+bc,-bf,-bd],[-bc,+bf,-bd],
+    [-bc,-bf,+bd],[-bc,-bf,-bd],[+bf,+bd,+bc],[+bf,-bd,+bc],[-bf,+bd,+bc],[+bf,+bd,-bc],
+    [-bf,-bd,+bc],[+bf,-bd,-bc],[-bf,+bd,-bc],[-bf,-bd,-bc],[+bd,+bc,+bf],[-bd,+bc,+bf],
+    [+bd,+bc,-bf],[+bd,-bc,+bf],[-bd,+bc,-bf],[-bd,-bc,+bf],[+bd,-bc,-bf],[-bd,-bc,-bf],
+    [+bb,+bg,+bh],[+bb,+bg,-bh],[+bb,-bg,+bh],[-bb,+bg,+bh],[+bb,-bg,-bh],[-bb,+bg,-bh],
+    [-bb,-bg,+bh],[-bb,-bg,-bh],[+bg,+bh,+bb],[+bg,-bh,+bb],[-bg,+bh,+bb],[+bg,+bh,-bb],
+    [-bg,-bh,+bb],[+bg,-bh,-bb],[-bg,+bh,-bb],[-bg,-bh,-bb],[+bh,+bb,+bg],[-bh,+bb,+bg],
+    [+bh,+bb,-bg],[+bh,-bb,+bg],[-bh,+bb,-bg],[-bh,-bb,+bg],[+bh,-bb,-bg],[-bh,-bb,-bg]
+  ];
+  const p0=new THREE.Vector3(0,0,0);
+  const radius=new THREE.Vector3(...cords[0]).distanceTo(p0);
+  ball.add(new THREE.Mesh(new THREE.SphereGeometry(radius*0.98,48,48),whiteMat));
+  for (let i=0;i<cords.length;i++) for (let j=i+1;j<cords.length;j++) {
+    const p1=new THREE.Vector3(...cords[i]),p2=new THREE.Vector3(...cords[j]);
+    if (p1.distanceTo(p2)>bc*1.1) continue;
+    const mid=new THREE.Vector3((cords[i][0]+cords[j][0])/2,(cords[i][1]+cords[j][1])/2,(cords[i][2]+cords[j][2])/2);
+    const sc=p1.distanceTo(p0)/mid.distanceTo(p0);
+    ball.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(p1,new THREE.Vector3(mid.x*sc*sc,mid.y*sc*sc,mid.z*sc*sc),p2),8,lw,5,false),blackMat));
+  }
+  const fc=[[0,28,36,39,29],[1,32,41,37,30],[2,33,42,38,31],[3,34,40,43,35],
+    [4,12,44,47,13],[5,16,49,45,14],[6,17,50,46,15],[7,18,48,51,19],
+    [8,20,52,55,21],[9,24,57,53,22],[10,25,58,54,23],[11,26,56,59,27]];
+  const idx=[];
+  fc.forEach(f=>{for(let j=0;j<f.length-2;j++)idx.push(f[0],f[j+1],f[j+2]);});
+  ball.add(new THREE.Mesh(new THREE.PolyhedronBufferGeometry(cords.flat(Infinity),idx,radius,3),blackMat));
+})();
+ball.position.set(0, 0.5, 0);
+ball.castShadow = true;
+scene.add(ball);
+
+const shadowGeo = new THREE.CircleGeometry(0.45, 24);
+const shadowMat = new THREE.MeshBasicMaterial({ color:0, transparent:true, opacity:0.35, depthWrite:false });
+const ballShadow = new THREE.Mesh(shadowGeo, shadowMat);
+ballShadow.rotation.x = -Math.PI/2;
+ballShadow.position.y = 0.01;
+scene.add(ballShadow);
+
+function updateBallShadow() {
+  const h=Math.max(0,ball.position.y-0.5), hf=Math.max(0,1-h/5);
+  ballShadow.position.x=ball.position.x-h*0.3;
+  ballShadow.position.z=ball.position.z-h*0.2;
+  ballShadow.scale.setScalar(0.5+hf*0.5);
+  shadowMat.opacity=0.04+hf*0.28;
+}
+
+function createSparkle(x, y, z) {
+  const mat = new THREE.MeshBasicMaterial({ color:0xffdd00, transparent:true, opacity:1 });
+  const s = new THREE.Mesh(new THREE.SphereGeometry(0.08,4,4), mat);
+  s.position.set(x,y,z);
+  scene.add(s);
+  gsap.to(s.scale,    { x:0, y:0, z:0, duration:0.6 });
+  gsap.to(s.material, { opacity:0, duration:0.6, onComplete: () => scene.remove(s) });
+}
+
+// ─── 8. CURSORS (shared factory) ─────────────────────────────
+function makeCursorGroup(dotColor) {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(
+    new THREE.CircleGeometry(0.38, 32),
+    new THREE.MeshBasicMaterial({ color: dotColor, side: THREE.DoubleSide })
+  ));
+  g.add(new THREE.Mesh(
+    new THREE.RingGeometry(0.38, 0.47, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+  ));
+  return g;
+}
+
+// Kicker mode: oscillating aim cursor in front of goal back net
+const aimCursor = makeCursorGroup(0xee1111);
+aimCursor.position.set(0, GOAL_H/2, BACK_Z + 0.05);
+scene.add(aimCursor);
+
+// GK mode: catch cursor appears at ball's final destination
+const catchCursor = makeCursorGroup(0xee1111);
+catchCursor.visible = false;
+scene.add(catchCursor);
+
+// ─── 9. GOALKEEPER FIGURE ────────────────────────────────────
+// Headless — torso only. Used as AI keeper in KICKER mode, player-keeper in GK mode.
+const goalieGroup = new THREE.Group();
+function addGoaliePart(geom, mat, x, y, z) {
+  const m = new THREE.Mesh(geom, mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  goalieGroup.add(m);
+}
+addGoaliePart(new THREE.BoxGeometry(1.2, 2.2, 0.7), new THREE.MeshLambertMaterial({ color: 0x1a5fb4 }), 0, 1.1, 0);
+goalieGroup.position.set(0, 0, -14.5);
+scene.add(goalieGroup);
+
+// ─── 10. KICKER FIGURE (AI in GK mode) ───────────────────────
+// Headless — torso only. Walk/kick animation applied to whole group.
+const kickerGroup = new THREE.Group();
+(function buildKicker() {
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 1.5, 0.7),
+    new THREE.MeshLambertMaterial({ color: 0xe74c3c })
+  );
+  m.position.set(0, 1.75, 0);
+  m.castShadow = true;
+  kickerGroup.add(m);
+})();
+kickerGroup.rotation.y = Math.PI;
+kickerGroup.visible = false;
+scene.add(kickerGroup);
+
+// ─── 11. GAME MODE + STATE ───────────────────────────────────
+let gameMode    = 'KICKER';
+let kickerState = 'AIMING';   // 'AIMING' | 'POWERING' | 'KICKING'
+let gkState     = 'GK_IDLE';  // 'GK_IDLE' | 'GK_PENDING' | 'GK_REACTING' | 'GK_ANIMATING' | 'GK_RESULT'
+
+let aimValue = 0, aimDirection = 1;
+let power = 0, powerDirection = 1;
+let flightTween, gkReactTimeout, gkCountdownTimeout, resetTimeout;
+
+// GK mode per-round vars
+let gkFinalX = 0, gkFinalY = 0, gkRevealTime = 0;
+
+// ─── 12. DIFFICULTY & STATS ──────────────────────────────────
+// Each mode tracks its own difficulty so they never interfere.
+let kickerDifficulty = 1;
+let gkDifficulty     = 1;
+let consecutiveSaves  = 0;   // kicker mode: 3 AI saves in a row → drops kicker difficulty
+let consecutiveMisses = 0;   // GK mode: 3 goals conceded → drops GK difficulty
+let kickerGoals = 0;
+let gkSaves     = 0;
+
+function getDifficulty() {
+  return gameMode === 'KICKER' ? kickerDifficulty : gkDifficulty;
+}
+
+// ─── 13. CAMERA CONTROL ──────────────────────────────────────
+function transitionCamera(cfg, dur = 1.0) {
+  gsap.to(camera.position, { x:cfg.px, y:cfg.py, z:cfg.pz, duration:dur, ease:"power2.inOut" });
+  gsap.to(camLookAt,       { x:cfg.lx, y:cfg.ly, z:cfg.lz, duration:dur, ease:"power2.inOut" });
+}
+
+// ─── 14. DIFFICULTY SCALING ──────────────────────────────────
+
+// ── KICKER MODE: AI coverage ──
+// Keeper slides toward the shot destination but save is determined by coverage width.
+// Level 1 covers ±3.6u (60% of goal). Level 10 covers ±5.88u (98% of goal).
+function getGoalieHalfWidth() {
+  const t = (kickerDifficulty - 1) / 9;
+  return 3.6 + t * 2.28;  // 3.6u (lvl1) → 5.88u (lvl10)
+}
+
+// ── GK MODE: reaction window ──
+// The catch cursor is always visible for exactly 1000ms before auto-goal.
+// Player must react within gkSaveWindowMs() of the cursor appearing to earn a save.
+// Level 1 = 900ms save window (easy). Level 10 = 60ms (extremely tight).
+// Quadratic so early levels feel generous, high levels get punishing fast.
+const GK_CURSOR_LIFETIME_MS = 1000;
+
+function gkSaveWindowMs() {
+  const t = (gkDifficulty - 1) / 9;
+  return 900 - t * t * 840;  // 900ms (lvl1) → 60ms (lvl10)
+}
+
+// ─── 15. AI GOALKEEPER (kicker mode) ─────────────────────────
+// Keeper slides toward the shot for visual feedback.
+// Whether the save lands is determined by coverage width, not keeper position.
+let goalieTween = null;
+
+function triggerGoalieReact(finalX, finalY) {
+  if (goalieTween) goalieTween.kill();
+  gsap.killTweensOf(goalieGroup.position);
+
+  // Slide toward ball destination — faster at higher levels
+  const t        = (kickerDifficulty - 1) / 9;
+  const slideTime = 1.0 - t * 0.7;  // 1.0s (lvl1) → 0.3s (lvl10)
+  const targetX  = Math.max(-GOAL_W/2 + 0.3, Math.min(GOAL_W/2 - 0.3, finalX));
+
+  goalieTween = gsap.to(goalieGroup.position, {
+    x: targetX, duration: slideTime, ease: "power2.out"
+  });
+
+  // Simple jump for high shots
+  if (finalY > 1.8) {
+    const jumpH = Math.min(1.8, (finalY - 1.8) * 0.9);
+    gsap.to(goalieGroup.position, {
+      y: jumpH, duration: slideTime * 0.6, ease: "power2.out", delay: slideTime * 0.1,
+      onComplete: () => gsap.to(goalieGroup.position, { y: 0, duration: 0.5, ease: "bounce.out" })
+    });
+  }
+}
+
+function resetGoalie() {
+  if (goalieTween) goalieTween.kill();
+  gsap.killTweensOf(goalieGroup.position);
+  gsap.to(goalieGroup.position, { x:0, y:0, duration:0.6, ease:"power2.out" });
+}
+
+// ─── 16. SHARED SHOT PHYSICS ─────────────────────────────────
+function launchBall(finalX, finalY, pf, rawAimX, saveChecker, onComplete) {
+  let curveFactor = 0;
+  if (pf >= CURVE_WINDOW_LOW && pf <= CURVE_WINDOW_HIGH) {
+    curveFactor = Math.sin(Math.PI * (pf - CURVE_WINDOW_LOW) / (CURVE_WINDOW_HIGH - CURVE_WINDOW_LOW));
+  }
+  const ctrlBow = curveFactor * (rawAimX - finalX) * 0.9;
+  const arcH    = 1.0 + pf * 5.0;
+
+  const startP = { x:0,                y:0.5,           z:0     };
+  const ctrlP  = { x:finalX + ctrlBow, y:finalY + arcH, z:-8    };
+  const endP   = { x:finalX,           y:finalY,         z:-15.5 };
+  const flightDuration = 0.85 + pf * 0.35;
+
+  let fi = { t:0 }, isSaved = false;
+
+  flightTween = gsap.to(fi, {
+    t:1, duration: flightDuration, ease:"power1.inOut",
+    onUpdate: () => {
+      const t=fi.t, u=1-t;
+      ball.position.x = u*u*startP.x + 2*u*t*ctrlP.x + t*t*endP.x;
+      ball.position.y = u*u*startP.y + 2*u*t*ctrlP.y + t*t*endP.y;
+      ball.position.z = u*u*startP.z + 2*u*t*ctrlP.z + t*t*endP.z;
+      updateBallShadow();
+      createSparkle(ball.position.x, ball.position.y, ball.position.z);
+
+      if (!isSaved && ball.position.z < -14.0 && ball.position.z > -15.2) {
+        if (saveChecker(ball.position.x, ball.position.y)) {
+          isSaved = true;
+          flightTween.kill();
+          gsap.killTweensOf(ball.rotation);
+          handleImpact('SAVE', ball.position.x, ball.position.y);
+        }
+      }
+    },
+    onComplete: () => { if (!isSaved) onComplete(finalX, finalY); }
+  });
+
+  gsap.to(ball.rotation, {
+    x: -Math.PI*6, y: (finalX / AIM_RANGE) * Math.PI*4, duration:1, ease:"none"
+  });
+
+  return flightDuration;
+}
+
+// ─── 17. KICKER MODE ─────────────────────────────────────────
+function kickerModeKick() {
+  const pf     = power / 100;
+  const finalY = 0.2 + 7.5 * pf * (1 - 0.52 * pf);
+
+  let curveFactor = 0;
+  if (pf >= CURVE_WINDOW_LOW && pf <= CURVE_WINDOW_HIGH) {
+    curveFactor = Math.sin(Math.PI * (pf - CURVE_WINDOW_LOW) / (CURVE_WINDOW_HIGH - CURVE_WINDOW_LOW));
+  }
+  const rawAimX = aimValue * AIM_RANGE;
+  const finalX  = rawAimX - rawAimX * 0.75 * curveFactor;
+
+  aimCursor.visible = false;
+
+  launchBall(
+    finalX, finalY, pf, rawAimX,
+    // Save check: coverage centred at x=0, independent of keeper animation position
+    (bx, _by) => Math.abs(bx) < getGoalieHalfWidth(),
+    (fx, fy) => {
+      const inX = fx > -(GOAL_W/2-0.25) && fx < (GOAL_W/2-0.25);
+      const inY = fy >= 0.3 && fy <= GOAL_H-0.15;
+      handleImpact(inX && inY ? 'GOAL' : 'MISS', fx, fy);
+    }
+  );
+
+  triggerGoalieReact(finalX, finalY);
+}
+
+function startPowering() {
+  if (kickerState !== 'AIMING') return;
+  kickerState = 'POWERING';
+  hideInstructions();
+  if (btnAction) btnAction.classList.add('is-active');
+}
+
+function commitKick() {
+  if (kickerState !== 'POWERING') return;
+  kickerState = 'KICKING';
+  if (btnAction) btnAction.classList.remove('is-active');
+  kickerModeKick();
+}
+
+// ─── 18. GK MODE ─────────────────────────────────────────────
+function gkStartRound() {
+  if (gkState !== 'GK_IDLE') return;
+  gkState = 'GK_PENDING';
+  hideInstructions();
+
+  gkFinalX = (Math.random() * 2 - 1) * (GOAL_W/2 - 0.8);  // ±5.2
+  gkFinalY = 0.3 + Math.random() * (GOAL_H - 0.55);        // 0.3→3.75
+
+  resetGoalie();
+  gkResetKicker();
+  catchCursor.visible = false;
+  ball.position.set(0, 0.5, 0);
+
+  const revealDelay = 1.5 + Math.random() * 2.0;
+  gkAnimateKickerApproach();
+  if (btnAction) btnAction.textContent = '...';
+
+  gkReactTimeout = setTimeout(gkRevealCatchCursor, revealDelay * 1000);
+}
+
+function gkRevealCatchCursor() {
+  gkState      = 'GK_REACTING';
+  gkRevealTime = Date.now();
+
+  catchCursor.position.set(gkFinalX, gkFinalY, GOAL_Z + 0.1);
+  catchCursor.visible = true;
+  gsap.fromTo(catchCursor.scale,
+    { x:0, y:0, z:0 },
+    { x:1, y:1, z:1, duration:0.2, ease:"back.out(2.5)" }
+  );
+
+  if (btnAction) btnAction.textContent = 'DIVE!';
+
+  // Cursor is always visible for exactly 1 second — after that, auto-goal
+  gkCountdownTimeout = setTimeout(() => {
+    if (gkState === 'GK_REACTING') gkPlayerReact();
+  }, GK_CURSOR_LIFETIME_MS);
+}
+
+function gkPlayerReact() {
+  if (gkState !== 'GK_REACTING') return;
+  gkState = 'GK_ANIMATING';
+  clearTimeout(gkCountdownTimeout);
+
+  const reactionMs = Date.now() - gkRevealTime;
+  // Save only if player reacted within the level's save window
+  const isSave = reactionMs <= gkSaveWindowMs();
+
+  catchCursor.visible = false;
+  if (btnAction) btnAction.textContent = '...';
+
+  gkDiveKeeper(gkFinalX, gkFinalY, isSave);
+
+  gkAnimateKickerKick(() => {
+    const pf = 0.45 + Math.random() * 0.45;
+    launchBall(
+      gkFinalX, gkFinalY, pf, gkFinalX,
+      () => isSave,
+      (fx, fy) => handleImpact(isSave ? 'SAVE' : 'GOAL', fx, fy)
+    );
+  });
+}
+
+function gkDiveKeeper(finalX, finalY, isSave) {
+  const diveX    = Math.max(-GOAL_W/2+0.3, Math.min(GOAL_W/2-0.3, finalX));
+  const duration = isSave ? 0.55 : 0.90;
+  gsap.to(goalieGroup.position, { x: diveX, duration, ease:"power3.out" });
+  if (finalY > 1.5) {
+    const jumpH = Math.min(2.0, (finalY - 1.5) * 1.1);
+    gsap.to(goalieGroup.position, {
+      y: jumpH, duration: duration * 0.7, ease:"power2.out", delay:0.05,
+      onComplete: () => gsap.to(goalieGroup.position, { y:0, duration:0.55, ease:"bounce.out", delay:0.1 })
+    });
+  }
+}
+
+// ─── 19. KICKER FIGURE ANIMATIONS ────────────────────────────
+function gkResetKicker() {
+  gsap.killTweensOf(kickerGroup.position);
+  gsap.killTweensOf(kickerGroup.rotation);
+  kickerGroup.position.set(0, 0, 1.8);
+  kickerGroup.rotation.set(0, Math.PI, 0);
+}
+
+function gkAnimateKickerApproach() {
+  const walkDur = 0.9;
+  gsap.to(kickerGroup.position, { z: 0.35, duration: walkDur, ease:"power1.inOut" });
+  const bobProxy = { t: 0 };
+  gsap.to(bobProxy, {
+    t: 1, duration: walkDur,
+    onUpdate: () => {
+      kickerGroup.position.x = Math.sin(bobProxy.t * Math.PI * 5) * 0.08;
+      kickerGroup.position.y = Math.abs(Math.sin(bobProxy.t * Math.PI * 5)) * 0.12;
+    },
+    onComplete: () => { kickerGroup.position.x = 0; kickerGroup.position.y = 0; }
+  });
+}
+
+function gkAnimateKickerKick(onComplete) {
+  gsap.to(kickerGroup.rotation, {
+    x: 0.55, duration: 0.18, ease:"power3.in",
+    onComplete: () =>
+      gsap.to(kickerGroup.rotation, { x: 0, duration: 0.30, ease:"power2.out", onComplete })
+  });
+}
+
+// ─── 20. NET RIPPLE ──────────────────────────────────────────
+function animateNetRipple(hitX, hitY) {
+  const pos=backNetGeometry.attributes.position, n=pos.count;
+  const oz=Array.from({length:n},(_,i)=>pos.getZ(i));
+  const lhx=hitX, lhy=hitY-GOAL_H/2;
+  const d=Array.from({length:n},(_,i)=>Math.sqrt((pos.getX(i)-lhx)**2+(pos.getY(i)-lhy)**2));
+  let proxy={t:0};
+  gsap.to(proxy,{t:1,duration:1.6,ease:"none",
+    onUpdate:()=>{
+      for(let i=0;i<n;i++){
+        const di=d[i]; if(di>6){pos.setZ(i,oz[i]);continue;}
+        const ib=Math.max(0,(2-di)/2)*2.4*Math.max(0,1-proxy.t*3);
+        const env=Math.max(0,1-di/6);
+        const rip=Math.sin(di*2.8-proxy.t*5.5*2.8)*env*Math.max(0,1-proxy.t*0.85)*1.68;
+        pos.setZ(i,oz[i]-ib-(di<proxy.t*5.5+0.5?rip:0));
+      }
+      pos.needsUpdate=true;
+    },
+    onComplete:()=>{for(let i=0;i<n;i++)pos.setZ(i,oz[i]);pos.needsUpdate=true;}
+  });
+}
+
+// ─── 21. IMPACT HANDLER ──────────────────────────────────────
+function handleImpact(result, hitX, hitY) {
+  if (gameMode === 'GOALKEEPER') gkState = 'GK_RESULT';
+
+  if (result === 'GOAL') {
+    msgOverlay.innerText = 'GOAL! ⚽';
+    msgOverlay.style.color = '#00ff88';
+    if (gameMode === 'KICKER') {
+      kickerGoals++;
+      consecutiveSaves = 0;
+      kickerDifficulty = Math.min(10, kickerDifficulty + 1);
+    } else {
+      consecutiveMisses++;
+      if (consecutiveMisses >= 3) {
+        gkDifficulty = Math.max(1, gkDifficulty - 1);
+        consecutiveMisses = 0;
+      }
+    }
+    gsap.to(ball.position, {
+      z: BACK_Z+0.3, y: Math.min(hitY, GOAL_H-0.3), duration:0.25, ease:"power2.in",
+      onComplete: () => gsap.to(ball.position, { y:0.5, duration:0.5, ease:"bounce.out" })
+    });
+    animateNetRipple(hitX, hitY);
+
+  } else if (result === 'SAVE') {
+    msgOverlay.innerText = 'SAVED! 🧤';
+    msgOverlay.style.color = '#ffff00';
+    if (gameMode === 'KICKER') {
+      consecutiveSaves++;
+      if (consecutiveSaves >= 3) {
+        kickerDifficulty = Math.max(1, kickerDifficulty - 1);
+        consecutiveSaves = 0;
+      }
+    } else {
+      gkSaves++;
+      consecutiveMisses = 0;
+      gkDifficulty = Math.min(10, gkDifficulty + 1);
+    }
+    gsap.to(ball.position, {
+      z:-8, y:1.5, x: ball.position.x+(Math.random()>0.5?4:-4), duration:0.9, ease:"power2.out"
+    });
+    gsap.to(ball.position, { y:0.5, duration:0.4, delay:0.9, ease:"bounce.out" });
+
+  } else {
+    msgOverlay.innerText = 'MISS! ✗';
+    msgOverlay.style.color = '#ff4444';
+    consecutiveSaves = 0;
+    if (gameMode === 'KICKER') kickerDifficulty = Math.max(1, kickerDifficulty - 1);
+    gsap.to(ball.position, { z:-25, y:0.5, duration:0.8, ease:"bounce.out" });
+  }
+
+  updateStatsUI();
+  gsap.to(msgOverlay, { opacity:1, scale:1, duration:0.5, ease:"back.out(1.7)", yoyo:true, repeat:1, repeatDelay:1 });
+  resetTimeout = setTimeout(resetGame, 2500);
+}
+
+// ─── 22. RESET ───────────────────────────────────────────────
+function resetGame() {
+  clearTimeout(gkReactTimeout);
+  clearTimeout(gkCountdownTimeout);
+  clearTimeout(resetTimeout);
+  if (flightTween) flightTween.kill();
+
+  ball.position.set(0, 0.5, 0);
+  ball.rotation.set(0, 0, 0);
+  ballShadow.position.set(0, 0.01, 0);
+  ballShadow.scale.setScalar(1);
+  shadowMat.opacity = 0.35;
+
+  power = 0; powerDirection = 1; setPowerRing(0);
+  aimValue = 0; aimDirection = 1;
+  catchCursor.visible = false;
+
+  resetGoalie();
+
+  if (gameMode === 'KICKER') {
+    kickerState = 'AIMING';
+    aimCursor.visible = true;
+    aimCursor.position.x = 0;
+    if (btnAction) { btnAction.textContent = 'HOLD'; btnAction.classList.remove('is-active'); }
+  } else {
+    gkState = 'GK_IDLE';
+    gkResetKicker();
+    if (btnAction) btnAction.textContent = 'KICK OFF';
+  }
+}
+
+// ─── 23. MODE SWITCHING ──────────────────────────────────────
+function switchMode(mode) {
+  clearTimeout(gkReactTimeout);
+  clearTimeout(gkCountdownTimeout);
+  clearTimeout(resetTimeout);
+  if (flightTween) flightTween.kill();
+  gameMode = mode;
+
+  if (mode === 'KICKER') {
+    kickerDifficulty = 1; kickerGoals = 0; consecutiveSaves = 0;
+    transitionCamera(CAM_KICKER);
+    kickerGroup.visible = false;
+    aimCursor.visible   = true;
+    catchCursor.visible = false;
+    if (powerRing) powerRing.style.display = '';
+    if (btnMode) btnMode.textContent = '🧤 Keeper Mode';
+  } else {
+    gkDifficulty = 1; gkSaves = 0; consecutiveMisses = 0;
+    transitionCamera(CAM_GK);
+    kickerGroup.visible = true;
+    aimCursor.visible   = false;
+    catchCursor.visible = false;
+    if (powerRing) powerRing.style.display = 'none';
+    if (btnMode) btnMode.textContent = '⚽ Kicker Mode';
+  }
+
+  resetGame();
+  updateStatsUI();
+  showInstructions();
+}
+
+// ─── 24. UI ELEMENTS ─────────────────────────────────────────
+const powerRing     = document.getElementById('power-ring');
+const msgOverlay    = document.getElementById('message-overlay');
+const btnAction     = document.getElementById('btn-action');
+const shotCounterEl = document.getElementById('shot-counter');
+const gameLevelEl   = document.getElementById('game-level');
+
+// Mode button: use HTML element if present, otherwise create and inject
+let btnMode = document.getElementById('game-mode');
+if (!btnMode) {
+  btnMode = document.createElement('button');
+  btnMode.addEventListener('mouseenter', () => btnMode.style.background = 'rgba(255,255,255,0.28)');
+  btnMode.addEventListener('mouseleave', () => btnMode.style.background = 'rgba(255,255,255,0.15)');
+  if (shotCounterEl && shotCounterEl.parentNode) shotCounterEl.parentNode.appendChild(btnMode);
+}
+btnMode.textContent = '🧤 Keeper Mode';
+btnMode.addEventListener('click', () => switchMode(gameMode === 'KICKER' ? 'GOALKEEPER' : 'KICKER'));
+
+// ─── INSTRUCTIONS OVERLAY ────────────────────────────────────
+const INSTRUCTIONS = {
+  KICKER:     '⚽  <b>Hold</b> to charge power · <b>Release</b> to shoot<br>Aim for the corners to beat the keeper',
+  GOALKEEPER: '🧤  Press <b>KICK OFF</b> to start each round<br>Watch for the <span style="color:#ff4444">●</span> and press <b>DIVE</b> fast to save!'
+};
+
+const instructionsEl = document.getElementById('instructions');
+
+function showInstructions() {
+  if (!instructionsEl) return;
+  instructionsEl.innerHTML = INSTRUCTIONS[gameMode];
+  instructionsEl.style.opacity = '1';
+}
+
+function hideInstructions() {
+  if (!instructionsEl) return;
+  instructionsEl.style.opacity = '0';
+}
+
+showInstructions();
+
+function setPowerRing(p) {
+  if (!powerRing) return;
+  const t = p / 100;
+  const inSweet = t >= CURVE_WINDOW_LOW && t <= CURVE_WINDOW_HIGH;
+  let r, g;
+  if (inSweet) {
+    const sw = (t - CURVE_WINDOW_LOW) / (CURVE_WINDOW_HIGH - CURVE_WINDOW_LOW);
+    r = Math.round(60  + sw * 180);
+    g = Math.round(200 - sw * 60);
+  } else {
+    r = Math.round(200 + t * 55);
+    g = Math.round(120 - t * 120);
+  }
+  powerRing.style.transform  = `scale(${(0.60 + t * 0.40).toFixed(3)})`;
+  powerRing.style.opacity    = (0.15 + t * 0.65).toFixed(3);
+  powerRing.style.background = `radial-gradient(circle, transparent 28%, rgba(${r},${g},30,0.85) 28%)`;
+}
+
+function updateStatsUI() {
+  if (shotCounterEl) {
+    shotCounterEl.textContent = gameMode === 'KICKER'
+      ? `⚽ ${kickerGoals}`
+      : `🧤 ${gkSaves}`;
+  }
+  if (gameLevelEl) {
+    gameLevelEl.textContent = `Lvl ${getDifficulty()}`;
+  }
+}
+updateStatsUI();
+
+// ─── 25. INPUT HANDLING ──────────────────────────────────────
+window.addEventListener('keydown', e => {
+  if (e.code !== 'Space') return;
+  e.preventDefault();
+  if (gameMode === 'KICKER') {
+    if (kickerState === 'AIMING') startPowering();
+  } else {
+    if (gkState === 'GK_IDLE')           gkStartRound();
+    else if (gkState === 'GK_REACTING')  gkPlayerReact();
+  }
+});
+
+window.addEventListener('keyup', e => {
+  if (e.code === 'Space' && gameMode === 'KICKER' && kickerState === 'POWERING') commitKick();
+});
+
+if (btnAction) {
+  btnAction.addEventListener('pointerdown', () => {
+    if (gameMode === 'KICKER') {
+      if (kickerState === 'AIMING') startPowering();
+    } else {
+      if (gkState === 'GK_IDLE')          gkStartRound();
+      else if (gkState === 'GK_REACTING') gkPlayerReact();
+    }
+  });
+  btnAction.addEventListener('pointerup', () => {
+    if (gameMode === 'KICKER' && kickerState === 'POWERING') commitKick();
+  });
+  btnAction.addEventListener('contextmenu', e => e.preventDefault());
+}
+
+// ─── 26. ANIMATION LOOP ──────────────────────────────────────
+let clock = 0;
+function animate() {
+  requestAnimationFrame(animate);
+  clock += 0.016;
+
+  for (const f of fans)
+    f.position.y = f._baseY + Math.sin(clock * 1.8 + f._phase) * f._amplitude;
+
+  if (gameMode === 'KICKER') {
+    if (kickerState === 'AIMING') {
+      aimValue += 0.03 * aimDirection;
+      if (aimValue >= 1)  { aimValue = 1;  aimDirection = -1; }
+      if (aimValue <= -1) { aimValue = -1; aimDirection =  1; }
+      aimCursor.position.x = aimValue * AIM_RANGE;
+      if (btnAction) btnAction.textContent = 'HOLD';
+    }
+    if (kickerState === 'POWERING') {
+      power += 2.2 * powerDirection;
+      if (power >= 100) { power = 100; powerDirection = -1; }
+      if (power <= 0)   { power = 0;   powerDirection =  1; }
+      setPowerRing(power);
+      if (btnAction) btnAction.textContent = 'RELEASE';
+    }
+  }
+
+  camera.lookAt(camLookAt.x, camLookAt.y, camLookAt.z);
+  updateBallShadow();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ─── 27. RESIZE ──────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});

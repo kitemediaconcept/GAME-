@@ -1,0 +1,108 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Barlow Condensed", system-ui, sans-serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background-color: #f4f6f5;
+    color: #0b141a;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}
+
+/* Preserve the user-supplied tactile power-ring & action button mechanics */
+.power-ring-wrap {
+  position: relative;
+  width: 124px;
+  height: 124px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.power-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 30%, rgba(217, 255, 112, 0.85) 30%);
+  opacity: 0;
+  transform: scale(0.62);
+  transition: transform 0.04s linear, opacity 0.04s linear, background 0.1s linear;
+  pointer-events: none;
+}
+
+.btn-action-ring {
+  position: relative;
+  z-index: 2;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: rgba(250, 252, 250, 0.94);
+  border: 2px solid rgba(11, 20, 26, 0.18);
+  color: #0b141a;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+  transition: background 0.12s ease, border-color 0.12s ease, transform 0.08s ease;
+}
+
+.btn-action-ring:hover {
+  background: #ffffff;
+}
+
+.btn-action-ring:active,
+.btn-action-ring.is-active {
+  background: #d9ff70;
+  border-color: #0b141a;
+  color: #0b141a;
+  transform: scale(0.95);
+}
+
+.btn-action-ring:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes swipeFloatUp {
+  0% {
+    transform: translateY(14px) scale(0.92);
+    opacity: 0;
+  }
+  25% {
+    opacity: 0.95;
+  }
+  75% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: translateY(-28px) scale(1.06);
+    opacity: 0;
+  }
+}
+
+.animate-swipe-cue {
+  animation: swipeFloatUp 1.65s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+}
+

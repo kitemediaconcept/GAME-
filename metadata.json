@@ -1,0 +1,6 @@
+{
+  "name": "iPhone vs Android — Penalty Shootout Giveaway",
+  "description": "Mobile-first 3D football penalty shootout giveaway campaign featuring Team iPhone vs Team Android goalkeeper kits, server-validated 5-shot scoring, live provisional leaderboard, and secure admin dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
