@@ -1,0 +1,251 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── GLOBAL DEFAULT DENY ─────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ─── PRIMITIVE HELPERS ───────────────────────────────────
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidPhoneDocId(id) {
+      return id is string && id.size() >= 9 && id.size() <= 24 && id.matches('^p_[0-9]{7,20}$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'kitemediaconcept@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    // ─── VALIDATION BLUEPRINTS ───────────────────────────────
+    function isValidCampaignConfig(data) {
+      return data.keys().hasAll([
+          'title', 'headline', 'subheadline', 'bannerUrl',
+          'startDate', 'endDate', 'campaignStatus',
+          'totalAttempts', 'qualificationThreshold', 'winnerCount',
+          'tieBreakerRule', 'rulesText', 'prizeNote', 'prizes', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'title', 'headline', 'subheadline', 'bannerUrl',
+          'startDate', 'endDate', 'campaignStatus',
+          'totalAttempts', 'qualificationThreshold', 'winnerCount',
+          'tieBreakerRule', 'rulesText', 'prizeNote', 'prizes', 'updatedAt'
+        ])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 100
+        && data.headline is string && data.headline.size() >= 1 && data.headline.size() <= 140
+        && data.subheadline is string && data.subheadline.size() >= 1 && data.subheadline.size() <= 300
+        && data.bannerUrl is string && data.bannerUrl.size() <= 500
+        && data.startDate is string && data.startDate.size() >= 4 && data.startDate.size() <= 30
+        && data.endDate is string && data.endDate.size() >= 4 && data.endDate.size() <= 30
+        && data.campaignStatus in ['open', 'closed', 'draft']
+        && data.totalAttempts is int && data.totalAttempts >= 1 && data.totalAttempts <= 10
+        && data.qualificationThreshold is int && data.qualificationThreshold >= 1 && data.qualificationThreshold <= 10
+        && data.winnerCount is int && data.winnerCount >= 1 && data.winnerCount <= 100
+        && data.tieBreakerRule in ['earliest_completion', 'accuracy_score', 'random_draw']
+        && data.rulesText is string && data.rulesText.size() >= 1 && data.rulesText.size() <= 4000
+        && data.prizeNote is string && data.prizeNote.size() <= 500
+        && data.prizes is list && data.prizes.size() <= 10
+        && (data.prizes.size() == 0 || data.prizes[0] is map)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidParticipant(data) {
+      return data.keys().hasAll([
+          'entryNumber', 'name', 'phone', 'normalizedPhone', 'sessionSecret',
+          'rulesAccepted', 'team', 'status', 'attempts',
+          'score', 'totalAccuracy', 'qualified', 'winnerStatus',
+          'overrideNote', 'completedAt', 'winnerConfirmedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'entryNumber', 'name', 'phone', 'normalizedPhone', 'sessionSecret',
+          'rulesAccepted', 'team', 'status', 'attempts',
+          'score', 'totalAccuracy', 'qualified', 'winnerStatus',
+          'overrideNote', 'completedAt', 'winnerConfirmedAt', 'createdAt', 'updatedAt'
+        ])
+        && data.entryNumber is string && data.entryNumber.size() >= 4 && data.entryNumber.size() <= 20
+        && data.entryNumber.matches('^IVA-[A-Z0-9]{4,12}$')
+        && data.name is string && data.name.size() >= 2 && data.name.size() <= 80
+        && data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 25
+        && data.normalizedPhone is string && data.normalizedPhone.size() >= 7 && data.normalizedPhone.size() <= 20
+        && data.normalizedPhone.matches('^[0-9]{7,20}$')
+        && data.sessionSecret is string && data.sessionSecret.size() >= 16 && data.sessionSecret.size() <= 64
+        && data.sessionSecret.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.rulesAccepted is bool && data.rulesAccepted == true
+        && data.team in ['none', 'iphone', 'android']
+        && data.status in ['registered', 'team_selected', 'in_progress', 'completed']
+        && data.attempts is list && data.attempts.size() <= 10
+        && (data.attempts.size() == 0 || data.attempts[0] is map)
+        && data.score is int && data.score >= 0 && data.score <= 10
+        && data.totalAccuracy is int && data.totalAccuracy >= 0 && data.totalAccuracy <= 1000
+        && data.qualified is bool
+        && data.winnerStatus in ['none', 'proposed', 'confirmed', 'removed']
+        && data.overrideNote is string && data.overrideNote.size() <= 300
+        && data.completedAt is string && data.completedAt.size() <= 40
+        && data.winnerConfirmedAt is string && data.winnerConfirmedAt.size() <= 40
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['actor', 'actorUid', 'action', 'targetEntryNumber', 'reason', 'createdAt'])
+        && data.keys().hasOnly(['actor', 'actorUid', 'action', 'targetEntryNumber', 'reason', 'createdAt'])
+        && data.actor is string && data.actor.size() >= 1 && data.actor.size() <= 120
+        && isValidId(data.actorUid)
+        && data.actorUid == request.auth.uid
+        && data.action is string && data.action.size() >= 2 && data.action.size() <= 80
+        && data.targetEntryNumber is string && data.targetEntryNumber.size() <= 20
+        && data.reason is string && data.reason.size() >= 3 && data.reason.size() <= 400
+        && data.createdAt is timestamp;
+    }
+
+    function isValidAdminUser(data) {
+      return data.keys().hasAll(['email', 'role', 'createdAt'])
+        && data.keys().hasOnly(['email', 'role', 'createdAt'])
+        && data.email is string && data.email.size() >= 5 && data.email.size() <= 120
+        && data.role == 'admin'
+        && data.createdAt is timestamp;
+    }
+
+    // ─── COLLECTION: /campaign/{configId} ────────────────────
+    match /campaign/{configId} {
+      allow get: if isValidId(configId);
+      allow list: if false;
+      allow create: if isVerifiedUser()
+        && isValidId(configId)
+        && isValidCampaignConfig(incoming())
+        && incoming().updatedAt == request.time
+        && isAdmin();
+      allow update: if isVerifiedUser()
+        && isValidId(configId)
+        && isValidCampaignConfig(incoming())
+        && incoming().updatedAt == request.time
+        && isAdmin();
+      allow delete: if false;
+    }
+
+    // ─── COLLECTION: /participants/{participantId} (Name & Phone Only, PII Admin-Only Read) ─
+    match /participants/{participantId} {
+      // Strictly Admin-Only Reads (Zero public PII exposure!)
+      allow get: if isVerifiedUser() && isValidId(participantId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+
+      // Frictionless phone-number registration (write-only; 1 entry per phone doc ID)
+      allow create: if isValidPhoneDocId(participantId)
+        && isValidParticipant(incoming())
+        && participantId == ('p_' + incoming().normalizedPhone)
+        && incoming().status == 'registered'
+        && incoming().team == 'none'
+        && incoming().attempts.size() == 0
+        && incoming().score == 0
+        && incoming().totalAccuracy == 0
+        && incoming().qualified == false
+        && incoming().winnerStatus == 'none'
+        && incoming().overrideNote == ''
+        && incoming().completedAt == ''
+        && incoming().winnerConfirmedAt == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isValidId(participantId)
+        && isValidParticipant(incoming())
+        && incoming().entryNumber == existing().entryNumber
+        && incoming().name == existing().name
+        && incoming().phone == existing().phone
+        && incoming().normalizedPhone == existing().normalizedPhone
+        && incoming().sessionSecret == existing().sessionSecret
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Admin winner selection / status override
+          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+            'winnerStatus', 'overrideNote', 'winnerConfirmedAt', 'updatedAt'
+          ]))
+          // Active player session (guarded by immutable sessionSecret & terminal lock)
+          || (
+            existing().status != 'completed'
+            && (
+              // Action: Select Team
+              (
+                existing().status == 'registered'
+                && incoming().status == 'team_selected'
+                && incoming().team in ['iphone', 'android']
+                && incoming().diff(existing()).affectedKeys().hasOnly(['team', 'status', 'updatedAt'])
+              )
+              // Action: Record Penalty Shot
+              || (
+                existing().status in ['team_selected', 'in_progress']
+                && incoming().status in ['in_progress', 'completed']
+                && incoming().attempts.size() == existing().attempts.size() + 1
+                && incoming().score >= existing().score
+                && incoming().score <= existing().score + 1
+                && incoming().diff(existing()).affectedKeys().hasOnly([
+                  'attempts', 'score', 'totalAccuracy', 'qualified', 'status', 'completedAt', 'updatedAt'
+                ])
+              )
+            )
+          )
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(participantId)
+        && isAdmin();
+    }
+
+    // ─── COLLECTION: /auditLogs/{logId} ──────────────────────
+    match /auditLogs/{logId} {
+      allow get: if isVerifiedUser() && isValidId(logId) && isAdmin();
+      allow list: if isBootstrappedAdmin();
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidAuditLog(incoming())
+        && incoming().createdAt == request.time
+        && isAdmin();
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // ─── COLLECTION: /admins/{adminUid} ──────────────────────
+    match /admins/{adminUid} {
+      allow get: if isVerifiedUser()
+        && isValidId(adminUid)
+        && (adminUid == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isBootstrappedAdmin()
+        && isValidId(adminUid)
+        && isValidAdminUser(incoming())
+        && incoming().createdAt == request.time;
+      allow update: if isBootstrappedAdmin()
+        && isValidId(adminUid)
+        && isValidAdminUser(incoming())
+        && incoming().createdAt == existing().createdAt;
+      allow delete: if isBootstrappedAdmin() && isValidId(adminUid);
+    }
+  }
+}

@@ -1,0 +1,134 @@
+{
+  "entities": {
+    "CampaignConfig": {
+      "title": "CampaignConfig",
+      "description": "Global campaign settings, rules, dates, and prize allocation for the iPhone vs Android Penalty Shootout Giveaway.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "headline": { "type": "string", "minLength": 1, "maxLength": 140 },
+        "subheadline": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "bannerUrl": { "type": "string", "maxLength": 500 },
+        "startDate": { "type": "string", "minLength": 4, "maxLength": 30 },
+        "endDate": { "type": "string", "minLength": 4, "maxLength": 30 },
+        "campaignStatus": { "type": "string", "enum": ["open", "closed", "draft"] },
+        "totalAttempts": { "type": "integer" },
+        "qualificationThreshold": { "type": "integer" },
+        "winnerCount": { "type": "integer" },
+        "tieBreakerRule": {
+          "type": "string",
+          "enum": ["earliest_completion", "accuracy_score", "random_draw"]
+        },
+        "rulesText": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "prizeNote": { "type": "string", "maxLength": 500 },
+        "prizes": { "type": "array", "description": "Up to 10 prize tier objects" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "title",
+        "headline",
+        "subheadline",
+        "bannerUrl",
+        "startDate",
+        "endDate",
+        "campaignStatus",
+        "totalAttempts",
+        "qualificationThreshold",
+        "winnerCount",
+        "tieBreakerRule",
+        "rulesText",
+        "prizeNote",
+        "prizes",
+        "updatedAt"
+      ]
+    },
+    "Participant": {
+      "title": "Participant",
+      "description": "Private participant registration containing Name and Phone Number only (no email), team selection, penalty shootout attempts, score, and giveaway winner status.",
+      "type": "object",
+      "properties": {
+        "entryNumber": { "type": "string", "minLength": 4, "maxLength": 20, "pattern": "^IVA-[A-Z0-9]{4,12}$" },
+        "name": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "phone": { "type": "string", "minLength": 7, "maxLength": 25 },
+        "normalizedPhone": { "type": "string", "minLength": 7, "maxLength": 20, "pattern": "^[0-9]{7,20}$" },
+        "sessionSecret": { "type": "string", "minLength": 16, "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "rulesAccepted": { "type": "boolean" },
+        "team": { "type": "string", "enum": ["none", "iphone", "android"] },
+        "status": { "type": "string", "enum": ["registered", "team_selected", "in_progress", "completed"] },
+        "attempts": { "type": "array", "description": "Bounded list of up to 10 penalty shot outcomes" },
+        "score": { "type": "integer" },
+        "totalAccuracy": { "type": "integer" },
+        "qualified": { "type": "boolean" },
+        "winnerStatus": { "type": "string", "enum": ["none", "proposed", "confirmed", "removed"] },
+        "overrideNote": { "type": "string", "maxLength": 300 },
+        "completedAt": { "type": "string", "maxLength": 40 },
+        "winnerConfirmedAt": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "entryNumber",
+        "name",
+        "phone",
+        "normalizedPhone",
+        "sessionSecret",
+        "rulesAccepted",
+        "team",
+        "status",
+        "attempts",
+        "score",
+        "totalAccuracy",
+        "qualified",
+        "winnerStatus",
+        "overrideNote",
+        "completedAt",
+        "winnerConfirmedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AuditLogEntry": {
+      "title": "AuditLogEntry",
+      "description": "Immutable admin operations log for giveaway winner selection, manual overrides, and settings updates.",
+      "type": "object",
+      "properties": {
+        "actor": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "actorUid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "action": { "type": "string", "minLength": 2, "maxLength": 80 },
+        "targetEntryNumber": { "type": "string", "maxLength": 20 },
+        "reason": { "type": "string", "minLength": 3, "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["actor", "actorUid", "action", "targetEntryNumber", "reason", "createdAt"]
+    },
+    "AdminUser": {
+      "title": "AdminUser",
+      "description": "Authorized campaign administrator document keyed by Firebase Auth UID.",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "minLength": 5, "maxLength": 120 },
+        "role": { "type": "string", "enum": ["admin"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/campaign/{configId}": {
+      "schema": { "$ref": "#/entities/CampaignConfig" },
+      "description": "Publicly readable campaign configuration (admin-only writes)."
+    },
+    "/participants/{participantId}": {
+      "schema": { "$ref": "#/entities/Participant" },
+      "description": "PII-protected participant entries storing Name and Phone Number only (admin-only reads/lists/deletes; write-only phone-keyed create & session-secret-guarded gameplay updates)."
+    },
+    "/auditLogs/{logId}": {
+      "schema": { "$ref": "#/entities/AuditLogEntry" },
+      "description": "Immutable admin-only giveaway audit log."
+    },
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/AdminUser" },
+      "description": "Trusted administrator directory controlled by the bootstrapped owner."
+    }
+  }
+}

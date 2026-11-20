@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Scale, Check, ArrowRight } from 'lucide-react';
 import type { ParticipantSessionState, TeamId } from '../types.ts';
-import { selectSessionTeam } from '../lib/api.ts';
+import { selectTeamFirestore } from '../lib/firestoreCampaign.ts';
 
 interface TeamSelectorProps {
   session: ParticipantSessionState;
@@ -86,8 +86,8 @@ export function TeamSelector({ session, onTeamConfirmed }: TeamSelectorProps) {
     setError(null);
     setSubmitting(true);
     try {
-      const res = await selectSessionTeam(session.id, session.sessionToken, selected);
-      onTeamConfirmed(res.session);
+      const updated = await selectTeamFirestore(session, selected);
+      onTeamConfirmed(updated);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to lock team selection.');
     } finally {

@@ -61,7 +61,7 @@ export interface ParticipantRecord {
   id: string;
   entryNumber: string; // e.g. IVA-0001
   name: string;
-  email: string;
+  email?: string;
   phone: string;
   normalizedPhone: string;
   team: TeamId | null;
@@ -136,10 +136,12 @@ export interface ParticipantSessionState {
   id: string;
   entryNumber: string;
   name: string;
+  phone?: string;
   team: TeamId | null;
   status: 'registered' | 'in_progress' | 'completed';
   attempts: AttemptRecord[];
   score: number;
+  totalAccuracy?: number;
   qualified: boolean;
   provisionalRank: number | null;
   qualifiedTotal: number;

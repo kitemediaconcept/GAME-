@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { createServer as createViteServer } from 'vite';
+import QRCode from 'qrcode';
 import type {
   AdminOverviewPayload,
   AttemptRecord,
@@ -37,89 +38,10 @@ interface DatabaseSchema {
 const DEFAULT_BANNER_URL = '/src/assets/images/campaign_banner_stadium_1795079284582.jpg';
 
 function createSeedDatabase(): DatabaseSchema {
-  const now = Date.now();
-  const hoursAgo = (h: number) => new Date(now - h * 3600 * 1000).toISOString();
-
-  const seedSpecs: Array<{
-    name: string;
-    email: string;
-    phone: string;
-    team: TeamId;
-    outcomes: Array<'GOAL' | 'SAVE' | 'MISS'>;
-    hours: number;
-    marketing: boolean;
-  }> = [
-    { name: 'Arjun Menon', email: 'arjun.menon@example.com', phone: '+91 98470 11204', team: 'iphone', outcomes: ['GOAL', 'GOAL', 'GOAL', 'GOAL', 'GOAL'], hours: 18, marketing: true },
-    { name: 'Neha Krishnan', email: 'neha.k@example.com', phone: '+91 98951 44019', team: 'android', outcomes: ['GOAL', 'GOAL', 'GOAL', 'GOAL', 'GOAL'], hours: 16, marketing: false },
-    { name: 'Rohan Varghese', email: 'rohan.v@example.com', phone: '+91 97452 88901', team: 'iphone', outcomes: ['GOAL', 'GOAL', 'SAVE', 'GOAL', 'GOAL'], hours: 15, marketing: true },
-    { name: 'Fathima Ashraf', email: 'fathima.a@example.com', phone: '+91 96331 55210', team: 'android', outcomes: ['GOAL', 'GOAL', 'GOAL', 'MISS', 'GOAL'], hours: 14, marketing: true },
-    { name: 'Devika Nair', email: 'devika.nair@example.com', phone: '+91 94471 23098', team: 'iphone', outcomes: ['GOAL', 'SAVE', 'GOAL', 'GOAL', 'GOAL'], hours: 13, marketing: false },
-    { name: 'Karthik Suresh', email: 'karthik.s@example.com', phone: '+91 98462 77612', team: 'android', outcomes: ['GOAL', 'GOAL', 'GOAL', 'SAVE', 'GOAL'], hours: 11, marketing: true },
-    { name: 'Meera Thomas', email: 'meera.thomas@example.com', phone: '+91 99950 31822', team: 'iphone', outcomes: ['GOAL', 'GOAL', 'SAVE', 'GOAL', 'MISS'], hours: 10, marketing: false },
-    { name: 'Siddharth Rao', email: 'sid.rao@example.com', phone: '+91 98450 91234', team: 'android', outcomes: ['GOAL', 'SAVE', 'GOAL', 'GOAL', 'SAVE'], hours: 9, marketing: true },
-    { name: 'Ananya Pillai', email: 'ananya.p@example.com', phone: '+91 97440 60123', team: 'iphone', outcomes: ['GOAL', 'GOAL', 'MISS', 'GOAL', 'SAVE'], hours: 8, marketing: true },
-    { name: 'Bilal Muhammed', email: 'bilal.m@example.com', phone: '+91 98955 10447', team: 'android', outcomes: ['SAVE', 'GOAL', 'GOAL', 'GOAL', 'MISS'], hours: 7, marketing: false },
-    { name: 'Priya Joseph', email: 'priya.j@example.com', phone: '+91 94952 44811', team: 'iphone', outcomes: ['GOAL', 'SAVE', 'GOAL', 'MISS', 'GOAL'], hours: 5, marketing: true },
-    { name: 'Vikram Das', email: 'vikram.das@example.com', phone: '+91 96450 22319', team: 'android', outcomes: ['GOAL', 'SAVE', 'MISS', 'GOAL', 'SAVE'], hours: 4, marketing: false },
-    { name: 'Sneha Mathew', email: 'sneha.m@example.com', phone: '+91 95671 80214', team: 'iphone', outcomes: ['MISS', 'GOAL', 'SAVE', 'MISS', 'GOAL'], hours: 3, marketing: false },
-    { name: 'Aakash Raj', email: 'aakash.r@example.com', phone: '+91 97468 33190', team: 'android', outcomes: ['SAVE', 'MISS', 'GOAL', 'SAVE', 'MISS'], hours: 2, marketing: true },
-  ];
-
-  const participants: ParticipantRecord[] = seedSpecs.map((spec, idx) => {
-    const entrySeq = idx + 1;
-    const entryNumber = `IVA-${String(entrySeq).padStart(4, '0')}`;
-    const createdAt = hoursAgo(spec.hours + 0.1);
-    const completedAt = hoursAgo(spec.hours);
-
-    const attempts: AttemptRecord[] = spec.outcomes.map((outcome, shotIdx) => {
-      const side = shotIdx % 2 === 0 ? 1 : -1;
-      const finalX = outcome === 'GOAL' ? side * (4.4 + (shotIdx % 3) * 0.35) : outcome === 'SAVE' ? side * 1.4 : side * 6.8;
-      const finalY = outcome === 'GOAL' ? 1.8 + (shotIdx % 3) * 0.55 : outcome === 'SAVE' ? 1.6 : 4.3;
-      const accuracyScore = outcome === 'GOAL' ? 76 + ((entrySeq * 7 + shotIdx * 5) % 22) : outcome === 'SAVE' ? 18 : 0;
-      return {
-        attemptNumber: shotIdx + 1,
-        idempotencyKey: `seed-${entrySeq}-${shotIdx + 1}`,
-        aimValue: Number((finalX / 8.5).toFixed(3)),
-        power: outcome === 'GOAL' ? 50 : outcome === 'SAVE' ? 35 : 88,
-        finalX: Number(finalX.toFixed(2)),
-        finalY: Number(finalY.toFixed(2)),
-        curveFactor: outcome === 'GOAL' ? 0.82 : 0.1,
-        difficulty: shotIdx + 1,
-        goalieHalfWidth: Number((2.65 + shotIdx * 0.35).toFixed(2)),
-        outcome,
-        accuracyScore,
-        timestamp: completedAt,
-      };
-    });
-
-    const score = attempts.filter((a) => a.outcome === 'GOAL').length;
-    const totalAccuracy = attempts.reduce((sum, a) => sum + a.accuracyScore, 0);
-
-    return {
-      id: `seed-p-${entrySeq}`,
-      entryNumber,
-      name: spec.name,
-      email: spec.email,
-      phone: spec.phone,
-      normalizedPhone: normalizePhoneNumber(spec.phone),
-      team: spec.team,
-      acceptedRules: true,
-      marketingOptIn: spec.marketing,
-      status: 'completed',
-      attempts,
-      score,
-      totalAccuracy,
-      qualified: score >= 3,
-      winnerStatus: 'none',
-      winnerConfirmedAt: null,
-      overrideNote: null,
-      createdAt,
-      completedAt,
-    };
-  });
+  const participants: ParticipantRecord[] = [];
 
   return {
-    nextEntrySeq: participants.length + 1,
+    nextEntrySeq: 1,
     settings: {
       title: 'iPhone vs Android',
       headline: 'Play the Shootout. Win an iPhone!',
@@ -169,7 +91,7 @@ function createSeedDatabase(): DatabaseSchema {
     auditLog: [
       {
         id: 'audit-init-1',
-        timestamp: hoursAgo(24),
+        timestamp: new Date().toISOString(),
         actor: 'Campaign Admin',
         action: 'CAMPAIGN_PUBLISHED',
         reason: 'Published iPhone vs Android Penalty Shootout Giveaway with 5 attempts and 3/5 qualification threshold.',
@@ -863,6 +785,34 @@ async function startServer() {
       `attachment; filename="iphone-vs-android-${exportType}-${new Date().toISOString().slice(0, 10)}.csv"`
     );
     res.send(lines.join('\n'));
+  });
+
+  // ─── DIRECT SHAREABLE QR CODE PNG ENDPOINT ─────────────────
+  app.get('/api/qr.png', async (req, res) => {
+    try {
+      const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+      const proto = forwardedProto || req.protocol || 'https';
+      const host = req.get('host') || `localhost:${PORT}`;
+      const targetUrl = `${proto}://${host}/`;
+
+      const pngBuffer = await QRCode.toBuffer(targetUrl, {
+        type: 'png',
+        width: 800,
+        margin: 3,
+        errorCorrectionLevel: 'H',
+        color: {
+          dark: '#081722',
+          light: '#ffffff',
+        },
+      });
+      res.setHeader('Content-Type', 'image/png');
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      res.setHeader('Content-Disposition', 'inline; filename="iphone-vs-android-giveaway-qr.png"');
+      res.send(pngBuffer);
+    } catch (err) {
+      console.error('QR generation error:', err);
+      res.status(500).json({ error: 'Unable to generate QR code image.' });
+    }
   });
 
   // ─── VITE DEV MIDDLEWARE / STATIC PROD SERVING ─────────────

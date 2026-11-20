@@ -1,78 +1,123 @@
 import { useCallback, useEffect, useState } from 'react';
-import type {
-  ParticipantSessionState,
-  PublicCampaignPayload,
-  TeamId,
-} from './types.ts';
-import { fetchPublicCampaign } from './lib/api.ts';
+import type { CampaignSettings, ParticipantSessionState } from './types.ts';
+import {
+  DEFAULT_CAMPAIGN_SETTINGS,
+  fetchCampaignSettingsFirestore,
+} from './lib/firestoreCampaign.ts';
+import { detectAppRoute, getAppBasePath } from './lib/routing.ts';
 import { CampaignHome } from './components/CampaignHome.tsx';
 import { RegistrationForm } from './components/RegistrationForm.tsx';
 import { TeamSelector } from './components/TeamSelector.tsx';
 import { PenaltyGame3D } from './components/PenaltyGame3D.tsx';
 import { ResultsScreen } from './components/ResultsScreen.tsx';
-import { LeaderboardPage } from './components/LeaderboardPage.tsx';
 import { AdminDashboard } from './components/AdminDashboard.tsx';
+import { QrSharePage } from './components/QrSharePage.tsx';
 import { RulesModal } from './components/RulesModal.tsx';
+import { IStoreLogo, IStoreSplash } from './components/IStoreLogo.tsx';
+import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 
 type Screen =
   | 'home'
   | 'register'
   | 'team'
   | 'play_campaign'
-  | 'play_practice'
   | 'results'
-  | 'leaderboard'
-  | 'admin';
+  | 'admin'
+  | 'qr';
 
-const PREFILL_KEY = 'iva_player_prefill';
+const PREFILL_KEY = 'iva_player_prefill_v2';
+const SESSION_KEY = 'iva_active_session_v2';
+const SPLASH_SEEN_KEY = 'istore_splash_seen';
 
-function isAdminPath(): boolean {
-  if (typeof window === 'undefined') return false;
-  const p = window.location.pathname.replace(/\/+$/, '');
-  return p === '/admin' || window.location.hash === '#/admin';
+function loadSavedSession(): ParticipantSessionState | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ParticipantSessionState;
+    if (parsed && typeof parsed.id === 'string' && parsed.id.startsWith('p_')) {
+      return parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
-export default function App() {
-  const [screen, setScreen] = useState<Screen>(() => (isAdminPath() ? 'admin' : 'home'));
-  const [campaign, setCampaign] = useState<PublicCampaignPayload | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+function saveSessionLocal(next: ParticipantSessionState | null) {
+  try {
+    if (next) {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+    } else {
+      localStorage.removeItem(SESSION_KEY);
+    }
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+function AppContent() {
+  const [screen, setScreen] = useState<Screen>(() => detectAppRoute());
+  const [settings, setSettings] = useState<CampaignSettings>(DEFAULT_CAMPAIGN_SETTINGS);
   const [showRules, setShowRules] = useState(false);
 
-  const [session, setSession] = useState<ParticipantSessionState | null>(null);
-  const [practiceTeam, setPracticeTeam] = useState<TeamId>('iphone');
+  const [showSplash, setShowSplash] = useState<boolean>(() => {
+    const initialRoute = detectAppRoute();
+    if (initialRoute === 'admin' || initialRoute === 'qr') return false;
+    try {
+      return !sessionStorage.getItem(SPLASH_SEEN_KEY);
+    } catch {
+      return true;
+    }
+  });
+
+  const [session, setSessionState] = useState<ParticipantSessionState | null>(loadSavedSession);
   const [savedPrefill, setSavedPrefill] = useState<{
     name: string;
-    email: string;
     phone: string;
   } | null>(() => {
     try {
       const raw = localStorage.getItem(PREFILL_KEY);
-      return raw ? JSON.parse(raw) : null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return {
+        name: String(parsed?.name || ''),
+        phone: String(parsed?.phone || ''),
+      };
     } catch {
       return null;
     }
   });
 
-  const refreshCampaign = useCallback(async () => {
+  const setSession = useCallback((next: ParticipantSessionState | null) => {
+    setSessionState(next);
+    saveSessionLocal(next);
+  }, []);
+
+  const dismissSplash = useCallback(() => {
+    setShowSplash(false);
     try {
-      const data = await fetchPublicCampaign();
-      setCampaign(data);
-      setLoadError(null);
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Unable to load campaign.');
+      sessionStorage.setItem(SPLASH_SEEN_KEY, '1');
+    } catch {
+      // Ignore storage errors
     }
   }, []);
 
+  const refreshSettings = useCallback(async () => {
+    const cfg = await fetchCampaignSettingsFirestore();
+    setSettings(cfg);
+  }, []);
+
   useEffect(() => {
-    refreshCampaign();
-  }, [refreshCampaign]);
+    refreshSettings();
+  }, [refreshSettings]);
 
   useEffect(() => {
     const syncRoute = () => {
-      if (isAdminPath()) {
-        setScreen('admin');
+      const next = detectAppRoute();
+      if (next === 'admin' || next === 'qr') {
+        setScreen(next);
       } else {
-        setScreen((prev) => (prev === 'admin' ? 'home' : prev));
+        setScreen((prev) => (prev === 'admin' || prev === 'qr' ? 'home' : prev));
       }
     };
     window.addEventListener('popstate', syncRoute);
@@ -83,106 +128,71 @@ export default function App() {
     };
   }, []);
 
-  const exitAdminToPublic = useCallback(() => {
-    try {
-      if (window.location.pathname !== '/' || window.location.hash) {
-        window.history.pushState({}, '', '/');
-      }
-    } catch {
-      // Ignore history restrictions
-    }
-    refreshCampaign();
-    setScreen('home');
-  }, [refreshCampaign]);
+  // 1. Standalone Admin-Only Route (/admin or /game/admin) — zero public nav, zero leakage
+  if (screen === 'admin') {
+    return <AdminDashboard onCampaignMutated={refreshSettings} />;
+  }
 
-  const isInArena = screen === 'play_campaign' || screen === 'play_practice';
-  const isAdminScreen = screen === 'admin';
-
-  if (isAdminScreen) {
+  // 2. Standalone Shareable QR Poster Page (/qr or /game/qr)
+  if (screen === 'qr') {
     return (
-      <div className="min-h-[100dvh] bg-[#f4f6f5] text-[#0b141a]">
-        <AdminDashboard
-          onExit={exitAdminToPublic}
-          onCampaignMutated={refreshCampaign}
-        />
-      </div>
+      <QrSharePage
+        onOpenGame={() => {
+          try {
+            const base = getAppBasePath();
+            window.history.pushState({}, '', base || '/');
+          } catch {
+            // Ignore
+          }
+          setScreen('home');
+        }}
+      />
     );
   }
 
+  const isInArena = screen === 'play_campaign';
+
+  const handleStartPlay = () => {
+    if (session && session.status !== 'completed') {
+      setScreen(session.team ? 'play_campaign' : 'team');
+    } else {
+      setScreen('register');
+    }
+  };
+
   return (
     <div className="min-h-[100dvh] bg-[#f4f6f5] text-[#0b141a]">
-      {/* Strict 3-Zone Top Navigation Bar (hidden inside full-viewport 3D arena) */}
+      {/* Opening iStore Branded Splash Screen */}
+      {showSplash && <IStoreSplash onComplete={dismissSplash} />}
+
+      {/* Clean Mobile-Friendly Player Header with iStore Logo (NO Admin, NO Dashboard) */}
       {!isInArena && (
         <header className="sticky top-0 z-30 border-b border-slate-200/90 bg-white/95 backdrop-blur-md">
-          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-8 px-4 sm:px-6 lg:px-8">
-            {/* Zone 1: Single-line Brand Wordmark */}
+          <div className="mx-auto flex h-15 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
             <button
               type="button"
               onClick={() => setScreen('home')}
-              className="font-[var(--font-display)] text-2xl font-extrabold uppercase tracking-tight text-[#0b141a] whitespace-nowrap shrink-0"
+              className="flex items-center gap-2.5 shrink-0"
             >
-              iPhone vs Android
+              <IStoreLogo variant="dark" size="sm" />
+              <span className="h-5 w-px bg-slate-200" aria-hidden="true" />
+              <span className="font-[var(--font-display)] text-lg font-extrabold uppercase tracking-tight text-[#0b141a] whitespace-nowrap sm:text-xl">
+                iPhone vs Android
+              </span>
             </button>
 
-            {/* Zone 2: 4 Concise Single-Line Nav Links */}
-            <nav className="hidden md:flex items-center gap-7 text-sm font-medium text-slate-600">
-              <button
-                type="button"
-                onClick={() => setScreen('home')}
-                className={`hover:text-[#0b141a] transition-colors whitespace-nowrap shrink-0 ${
-                  screen === 'home' ? 'text-[#0b141a] font-semibold' : ''
-                }`}
-              >
-                Campaign
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  if (session && session.status !== 'completed') {
-                    setScreen(session.team ? 'play_campaign' : 'team');
-                  } else {
-                    setScreen('register');
-                  }
-                }}
-                className={`hover:text-[#0b141a] transition-colors whitespace-nowrap shrink-0 ${
-                  screen === 'register' || screen === 'team' ? 'text-[#0b141a] font-semibold' : ''
-                }`}
-              >
-                Play Shootout
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  refreshCampaign();
-                  setScreen('leaderboard');
-                }}
-                className={`hover:text-[#0b141a] transition-colors whitespace-nowrap shrink-0 ${
-                  screen === 'leaderboard' ? 'text-[#0b141a] font-semibold' : ''
-                }`}
-              >
-                Leaderboard
-              </button>
+            <div className="flex items-center gap-3 shrink-0">
               <button
                 type="button"
                 onClick={() => setShowRules(true)}
-                className="hover:text-[#0b141a] transition-colors whitespace-nowrap shrink-0"
+                className="text-xs font-semibold text-slate-600 hover:text-[#0b141a] whitespace-nowrap"
               >
                 Rules
               </button>
-            </nav>
-
-            {/* Zone 3: Single Primary Player Action (Admin lives exclusively at /admin) */}
-            <div className="flex items-center shrink-0">
               <button
                 type="button"
-                onClick={() => {
-                  if (session && session.status !== 'completed') {
-                    setScreen(session.team ? 'play_campaign' : 'team');
-                  } else {
-                    setScreen('register');
-                  }
-                }}
-                className="min-h-[40px] rounded-xl bg-[#090d11] px-4 py-2 text-xs font-bold tracking-wide text-white hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+                onClick={handleStartPlay}
+                className="min-h-[40px] rounded-xl bg-[#090d11] px-4 py-2 text-xs font-bold tracking-wide text-white hover:bg-slate-800 transition-colors whitespace-nowrap"
               >
                 Play Game
               </button>
@@ -191,155 +201,84 @@ export default function App() {
         </header>
       )}
 
-      {/* Loading & Error Handling */}
-      {!campaign && !loadError && (
-        <div className="mx-auto max-w-6xl px-4 py-16">
-          <div className="h-[420px] animate-pulse rounded-[28px] bg-slate-200/80" />
-        </div>
+      {screen === 'home' && (
+        <CampaignHome
+          settings={settings}
+          onPlayGame={handleStartPlay}
+          onOpenRules={() => setShowRules(true)}
+        />
       )}
 
-      {loadError && !campaign && (
-        <div className="mx-auto max-w-md px-4 py-20 text-center">
-          <p className="text-sm font-medium text-rose-700">{loadError}</p>
-          <button
-            type="button"
-            onClick={refreshCampaign}
-            className="mt-4 rounded-xl bg-[#090d11] px-5 py-2.5 text-xs font-bold text-white"
-          >
-            Retry
-          </button>
-        </div>
+      {screen === 'register' && (
+        <RegistrationForm
+          settings={settings}
+          prefill={savedPrefill}
+          existingSession={session}
+          onBack={() => setScreen('home')}
+          onOpenRules={() => setShowRules(true)}
+          onSuccess={(newSession, details) => {
+            setSession(newSession);
+            setSavedPrefill(details);
+            try {
+              localStorage.setItem(PREFILL_KEY, JSON.stringify(details));
+            } catch {
+              // Ignore storage quota errors
+            }
+            if (newSession.status === 'completed') {
+              setScreen('results');
+            } else if (newSession.team) {
+              setScreen('play_campaign');
+            } else {
+              setScreen('team');
+            }
+          }}
+        />
       )}
 
-      {/* Active Screens */}
-      {campaign && (
-        <>
-          {screen === 'home' && (
-            <CampaignHome
-              campaign={campaign}
-              onPlayGame={() => {
-                if (session && session.status !== 'completed') {
-                  setScreen(session.team ? 'play_campaign' : 'team');
-                } else {
-                  setScreen('register');
-                }
-              }}
-              onPracticePitch={(t) => {
-                setPracticeTeam(t);
-                setScreen('play_practice');
-              }}
-              onOpenRules={() => setShowRules(true)}
-              onViewLeaderboard={() => {
-                refreshCampaign();
-                setScreen('leaderboard');
-              }}
-            />
-          )}
-
-          {screen === 'register' && (
-            <RegistrationForm
-              settings={campaign.settings}
-              prefill={savedPrefill}
-              onBack={() => setScreen('home')}
-              onOpenRules={() => setShowRules(true)}
-              onPracticeInstead={() => setScreen('play_practice')}
-              onSuccess={(newSession, details) => {
-                setSession(newSession);
-                setSavedPrefill(details);
-                try {
-                  localStorage.setItem(PREFILL_KEY, JSON.stringify(details));
-                } catch {
-                  // Ignore storage quota errors
-                }
-                if (newSession.status === 'completed') {
-                  setScreen('results');
-                } else if (newSession.team) {
-                  setScreen('play_campaign');
-                } else {
-                  setScreen('team');
-                }
-              }}
-            />
-          )}
-
-          {screen === 'team' && session && (
-            <TeamSelector
-              session={session}
-              onTeamConfirmed={(updated) => {
-                setSession(updated);
-                setScreen('play_campaign');
-              }}
-            />
-          )}
-
-          {screen === 'play_campaign' && session && session.team && (
-            <PenaltyGame3D
-              mode="campaign"
-              team={session.team}
-              totalAttempts={campaign.settings.totalAttempts}
-              session={session}
-              onSessionUpdate={(updated) => setSession(updated)}
-              onCampaignComplete={(finalSession) => {
-                setSession(finalSession);
-                refreshCampaign();
-                setScreen('results');
-              }}
-              onExit={() => {
-                refreshCampaign();
-                setScreen('home');
-              }}
-            />
-          )}
-
-          {screen === 'play_practice' && (
-            <PenaltyGame3D
-              mode="practice"
-              team={practiceTeam}
-              onTeamChangePractice={(t) => setPracticeTeam(t)}
-              onExit={() => setScreen('home')}
-            />
-          )}
-
-          {screen === 'results' && session && (
-            <ResultsScreen
-              session={session}
-              settings={campaign.settings}
-              onViewLeaderboard={() => {
-                refreshCampaign();
-                setScreen('leaderboard');
-              }}
-              onPracticeMode={(t) => {
-                setPracticeTeam(t);
-                setScreen('play_practice');
-              }}
-              onOpenRules={() => setShowRules(true)}
-              onBackHome={() => {
-                refreshCampaign();
-                setScreen('home');
-              }}
-            />
-          )}
-
-          {screen === 'leaderboard' && (
-            <LeaderboardPage
-              campaign={campaign}
-              onBack={() => setScreen('home')}
-              onPlayGame={() => {
-                if (session && session.status !== 'completed') {
-                  setScreen(session.team ? 'play_campaign' : 'team');
-                } else {
-                  setScreen('register');
-                }
-              }}
-              onOpenRules={() => setShowRules(true)}
-            />
-          )}
-
-          {showRules && (
-            <RulesModal settings={campaign.settings} onClose={() => setShowRules(false)} />
-          )}
-        </>
+      {screen === 'team' && session && (
+        <TeamSelector
+          session={session}
+          onTeamConfirmed={(updated) => {
+            setSession(updated);
+            setScreen('play_campaign');
+          }}
+        />
       )}
+
+      {screen === 'play_campaign' && session && session.team && (
+        <PenaltyGame3D
+          mode="campaign"
+          team={session.team}
+          totalAttempts={settings.totalAttempts}
+          settings={settings}
+          session={session}
+          onSessionUpdate={(updated) => setSession(updated)}
+          onCampaignComplete={(finalSession) => {
+            setSession(finalSession);
+            setScreen('results');
+          }}
+          onExit={() => setScreen('home')}
+        />
+      )}
+
+      {screen === 'results' && session && (
+        <ResultsScreen
+          session={session}
+          settings={settings}
+          onOpenRules={() => setShowRules(true)}
+          onBackHome={() => setScreen('home')}
+        />
+      )}
+
+      {showRules && <RulesModal settings={settings} onClose={() => setShowRules(false)} />}
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <AppContent />
+    </ErrorBoundary>
   );
 }

@@ -3,7 +3,13 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import gsap from 'gsap';
 import { Volume2, VolumeX, ArrowLeft, Shield, ChevronsUp } from 'lucide-react';
-import type { AttemptRecord, ParticipantSessionState, ShotOutcome, TeamId } from '../types.ts';
+import type {
+  AttemptRecord,
+  CampaignSettings,
+  ParticipantSessionState,
+  ShotOutcome,
+  TeamId,
+} from '../types.ts';
 import {
   AIM_RANGE,
   BACK_Z,
@@ -21,12 +27,16 @@ import {
   createPitchTexture,
 } from '../lib/jerseyTextures.ts';
 import { createGoalkeeperRig } from '../lib/goalkeeperModel.ts';
-import { submitPenaltyShot } from '../lib/api.ts';
+import {
+  DEFAULT_CAMPAIGN_SETTINGS,
+  submitShotFirestore,
+} from '../lib/firestoreCampaign.ts';
 
 interface PenaltyGame3DProps {
   mode: 'campaign' | 'practice';
   team: TeamId;
   totalAttempts?: number;
+  settings?: CampaignSettings;
   session?: ParticipantSessionState | null;
   onTeamChangePractice?: (team: TeamId) => void;
   onSessionUpdate?: (session: ParticipantSessionState) => void;
@@ -108,6 +118,7 @@ export function PenaltyGame3D({
   mode,
   team,
   totalAttempts = 5,
+  settings = DEFAULT_CAMPAIGN_SETTINGS,
   session,
   onTeamChangePractice,
   onSessionUpdate,
@@ -151,6 +162,9 @@ export function PenaltyGame3D({
 
   const sessionRef = useRef(session ?? null);
   sessionRef.current = session ?? null;
+
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   const totalAttemptsRef = useRef(totalAttempts);
   totalAttemptsRef.current = totalAttempts;
@@ -1392,7 +1406,7 @@ export function PenaltyGame3D({
         }
         const idempotencyKey = `${currentSession.id}-kick-${currentSession.attempts.length + 1}-${Date.now()}`;
         try {
-          const res = await submitPenaltyShot(currentSession.id, currentSession.sessionToken, {
+          const res = await submitShotFirestore(currentSession, settingsRef.current, {
             aimValue: snapshotAim,
             power: snapshotPower,
             idempotencyKey,
@@ -1404,14 +1418,14 @@ export function PenaltyGame3D({
             a.finalX,
             a.finalY,
             a.power / 100,
-            res.rawAimX,
+            a.aimValue * AIM_RANGE,
             a.curveFactor,
             a.outcome,
             res.session
           );
         } catch (err) {
           if (disposed) return;
-          setShotError(err instanceof Error ? err.message : 'Unable to validate shot.');
+          setShotError(err instanceof Error ? err.message : 'Unable to save shot.');
           resetRound();
         }
       } else {
