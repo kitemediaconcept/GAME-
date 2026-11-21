@@ -51,6 +51,7 @@ import {
   type GiveawayExportFormat,
 } from '../lib/firestoreCampaign.ts';
 import { QrCodeStudio } from './QrSharePage.tsx';
+import { LiveGiveawayPicker } from './LiveGiveawayPicker.tsx';
 
 interface AdminDashboardProps {
   onCampaignMutated: () => void;
@@ -407,7 +408,7 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
                 [
                   { id: 'overview', label: 'Overview', icon: LayoutDashboard },
                   { id: 'participants', label: 'Participants', icon: Users },
-                  { id: 'giveaway', label: 'Giveaway & Export', icon: Trophy },
+                  { id: 'giveaway', label: 'Giveaway Picker & CSV', icon: Trophy },
                   { id: 'qr', label: 'QR Code & Links', icon: QrCode },
                   { id: 'settings', label: 'Settings', icon: Settings },
                 ] as const
@@ -778,9 +779,31 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
             </div>
           )}
 
-          {/* ─── TAB 3: GIVEAWAY APP EXPORT (Name & Phone Only) & WINNER DRAW ─── */}
+          {/* ─── TAB 3: LIVE GIVEAWAY WHEEL PICKER & CSV EXPORT ─── */}
           {tab === 'giveaway' && (
             <div className="mt-6 space-y-6">
+              {/* Interactive Live Giveaway Wheel Picker */}
+              <LiveGiveawayPicker
+                participants={rankedParticipants}
+                settings={settings}
+                onConfirmWinner={async (winner, note) => {
+                  if (!user) return;
+                  setBannerMsg(null);
+                  try {
+                    await adminOverrideParticipantWinner(user, winner, 'confirm', note);
+                    setBannerMsg({
+                      type: 'ok',
+                      text: `Confirmed official giveaway winner: ${winner.name} (${winner.phone}).`,
+                    });
+                  } catch (err) {
+                    setBannerMsg({
+                      type: 'err',
+                      text: err instanceof Error ? err.message : 'Unable to save winner.',
+                    });
+                  }
+                }}
+              />
+
               {/* Ready-to-Paste Giveaway App Export Box */}
               <div className="rounded-2xl border border-slate-200 bg-white p-6">
                 <div className="flex flex-wrap items-start justify-between gap-4">

@@ -103,13 +103,23 @@ service cloud.firestore {
         && data.attempts is list && data.attempts.size() <= 10
         && (data.attempts.size() == 0 || data.attempts[0] is map)
         && data.score is int && data.score >= 0 && data.score <= 10
-        && data.totalAccuracy is int && data.totalAccuracy >= 0 && data.totalAccuracy <= 1000
+        && data.totalAccuracy is number && data.totalAccuracy >= 0 && data.totalAccuracy <= 1000
         && data.qualified is bool
         && data.winnerStatus in ['none', 'proposed', 'confirmed', 'removed']
         && data.overrideNote is string && data.overrideNote.size() <= 300
         && data.completedAt is string && data.completedAt.size() <= 40
         && data.winnerConfirmedAt is string && data.winnerConfirmedAt.size() <= 40
         && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Dedicated admin winner-selection blueprint so verified admins can confirm/override
+    // winners across both current and legacy participant documents without mutating any other field.
+    function isValidParticipantAdminUpdate(data) {
+      return data.keys().hasAll(['winnerStatus', 'updatedAt'])
+        && data.winnerStatus in ['none', 'proposed', 'confirmed', 'removed']
+        && (!('overrideNote' in data) || data.overrideNote == null || (data.overrideNote is string && data.overrideNote.size() <= 300))
+        && (!('winnerConfirmedAt' in data) || data.winnerConfirmedAt == null || (data.winnerConfirmedAt is string && data.winnerConfirmedAt.size() <= 40))
         && data.updatedAt is timestamp;
     }
 
@@ -173,42 +183,47 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
 
-      allow update: if isValidId(participantId)
-        && isValidParticipant(incoming())
-        && incoming().entryNumber == existing().entryNumber
-        && incoming().name == existing().name
-        && incoming().phone == existing().phone
-        && incoming().normalizedPhone == existing().normalizedPhone
-        && incoming().sessionSecret == existing().sessionSecret
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
-        && (
-          // Admin winner selection / status override
-          (isAdmin() && incoming().diff(existing()).affectedKeys().hasOnly([
+      allow update: if (
+          // Tier 1: Verified Admin winner selection / status override (supports legacy & current docs)
+          isVerifiedUser()
+          && isValidId(participantId)
+          && isValidParticipantAdminUpdate(incoming())
+          && incoming().updatedAt == request.time
+          && incoming().diff(existing()).affectedKeys().hasOnly([
             'winnerStatus', 'overrideNote', 'winnerConfirmedAt', 'updatedAt'
-          ]))
-          // Active player session (guarded by immutable sessionSecret & terminal lock)
-          || (
-            existing().status != 'completed'
-            && (
-              // Action: Select Team
-              (
-                existing().status == 'registered'
-                && incoming().status == 'team_selected'
-                && incoming().team in ['iphone', 'android']
-                && incoming().diff(existing()).affectedKeys().hasOnly(['team', 'status', 'updatedAt'])
-              )
-              // Action: Record Penalty Shot
-              || (
-                existing().status in ['team_selected', 'in_progress']
-                && incoming().status in ['in_progress', 'completed']
-                && incoming().attempts.size() == existing().attempts.size() + 1
-                && incoming().score >= existing().score
-                && incoming().score <= existing().score + 1
-                && incoming().diff(existing()).affectedKeys().hasOnly([
-                  'attempts', 'score', 'totalAccuracy', 'qualified', 'status', 'completedAt', 'updatedAt'
-                ])
-              )
+          ])
+          && isAdmin()
+        )
+        || (
+          // Tier 2: Active player session (strictly guarded by full blueprint, immutable identity, & terminal lock)
+          isValidId(participantId)
+          && isValidParticipant(incoming())
+          && incoming().entryNumber == existing().entryNumber
+          && incoming().name == existing().name
+          && incoming().phone == existing().phone
+          && incoming().normalizedPhone == existing().normalizedPhone
+          && incoming().sessionSecret == existing().sessionSecret
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && existing().status != 'completed'
+          && (
+            // Action: Select Team
+            (
+              existing().status == 'registered'
+              && incoming().status == 'team_selected'
+              && incoming().team in ['iphone', 'android']
+              && incoming().diff(existing()).affectedKeys().hasOnly(['team', 'status', 'updatedAt'])
+            )
+            // Action: Record Penalty Shot
+            || (
+              existing().status in ['team_selected', 'in_progress']
+              && incoming().status in ['in_progress', 'completed']
+              && incoming().attempts.size() == existing().attempts.size() + 1
+              && incoming().score >= existing().score
+              && incoming().score <= existing().score + 1
+              && incoming().diff(existing()).affectedKeys().hasOnly([
+                'attempts', 'score', 'totalAccuracy', 'qualified', 'status', 'completedAt', 'updatedAt'
+              ])
             )
           )
         );

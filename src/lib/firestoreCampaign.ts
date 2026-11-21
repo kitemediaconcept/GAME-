@@ -376,7 +376,7 @@ export async function submitShotFirestore(
     typeof session.totalAccuracy === 'number'
       ? session.totalAccuracy
       : session.attempts.reduce((sum, a) => sum + (a.accuracyScore || 0), 0);
-  const nextAccuracy = Math.min(1000, prevAccuracy + attempt.accuracyScore);
+  const nextAccuracy = Math.min(1000, Math.round(prevAccuracy + attempt.accuracyScore));
   const isFinished = nextAttempts.length >= settings.totalAttempts;
   const nextQualified = nextScore >= settings.qualificationThreshold;
 
@@ -646,6 +646,7 @@ export async function adminConfirmProvisionalWinners(
       for (const p of proposed.slice(i, i + 400)) {
         batch.update(doc(db, 'participants', p.id), {
           winnerStatus: 'confirmed',
+          overrideNote: (p.overrideNote || 'Confirmed Official Winner').slice(0, 300),
           winnerConfirmedAt: nowIso,
           updatedAt: serverTimestamp(),
         });
@@ -730,12 +731,12 @@ export async function adminSaveCampaignSettings(
   const path = 'campaign/main';
   try {
     await setDoc(doc(db, 'campaign', 'main'), {
-      title: settings.title.trim().slice(0, 100) || 'iPhone vs Android',
-      headline: settings.headline.trim().slice(0, 140),
-      subheadline: settings.subheadline.trim().slice(0, 300),
+      title: settings.title.trim().slice(0, 100) || DEFAULT_CAMPAIGN_SETTINGS.title,
+      headline: settings.headline.trim().slice(0, 140) || DEFAULT_CAMPAIGN_SETTINGS.headline,
+      subheadline: settings.subheadline.trim().slice(0, 300) || DEFAULT_CAMPAIGN_SETTINGS.subheadline,
       bannerUrl: settings.bannerUrl.trim().slice(0, 500),
-      startDate: settings.startDate.slice(0, 30),
-      endDate: settings.endDate.slice(0, 30),
+      startDate: settings.startDate.trim().slice(0, 30) || DEFAULT_CAMPAIGN_SETTINGS.startDate,
+      endDate: settings.endDate.trim().slice(0, 30) || DEFAULT_CAMPAIGN_SETTINGS.endDate,
       campaignStatus: settings.campaignStatus,
       totalAttempts: Math.max(1, Math.min(10, Math.round(settings.totalAttempts))),
       qualificationThreshold: Math.max(
