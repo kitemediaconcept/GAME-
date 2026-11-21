@@ -214,39 +214,106 @@ export function createGoalkeeperJerseyTexture(
 }
 
 /**
- * Generates an LED stadium perimeter advertising board texture ("iPHONE vs ANDROID • PENALTY SHOOTOUT").
+ * Generates an LED stadium perimeter advertising board texture featuring the
+ * official Malayalam campaign banner ("ആപ്പിളോ ആൻഡ്രോയിഡോ?") & ISTORE DIGITAL logo.
  */
 export function createPerimeterBoardTexture(maxAnisotropy: number): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
-  canvas.width = 1024;
-  canvas.height = 128;
+  canvas.width = 1536;
+  canvas.height = 256;
   const ctx = canvas.getContext('2d')!;
 
-  ctx.fillStyle = '#09151d';
-  ctx.fillRect(0, 0, 1024, 128);
+  const rawBase = import.meta.env.BASE_URL || '/';
+  const base = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
+  const bannerSrc = `${base}assets/aistudio/ISTORE_Teaser_Poster-01.jpg_8f30a178.jpeg`;
+  const istoreSrc = `${base}assets/aistudio/istore_logo-02_a6f931c6.png`;
 
-  // Subtle lime top & bottom edge LEDs
-  ctx.fillStyle = '#d9ff70';
-  ctx.fillRect(0, 0, 1024, 6);
-  ctx.fillRect(0, 122, 1024, 6);
-
-  ctx.font = '800 54px "Barlow Condensed", sans-serif';
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'center';
-
-  const items = ['iPHONE vs ANDROID', 'PENALTY SHOOTOUT', '5 KICKS • TOP 10 WIN', 'iPHONE vs ANDROID'];
-  items.forEach((label, idx) => {
-    const cx = 128 + idx * 256;
-    ctx.fillStyle = idx % 2 === 0 ? '#ffffff' : '#d9ff70';
-    ctx.fillText(label, cx, 66);
-  });
+  const bannerImg = new Image();
+  const istoreImg = new Image();
+  bannerImg.crossOrigin = 'anonymous';
+  istoreImg.crossOrigin = 'anonymous';
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.wrapS = THREE.RepeatWrapping;
-  texture.repeat.set(2, 1);
+  texture.repeat.set(8, 1);
   texture.anisotropy = maxAnisotropy;
-  texture.needsUpdate = true;
+
+  const drawContained = (
+    img: HTMLImageElement,
+    boxX: number,
+    boxY: number,
+    boxW: number,
+    boxH: number
+  ) => {
+    if (!img.complete || img.naturalWidth === 0 || img.naturalHeight === 0) return;
+    const imgRatio = img.naturalWidth / img.naturalHeight;
+    const boxRatio = boxW / boxH;
+    let drawW = boxW;
+    let drawH = boxH;
+    if (imgRatio > boxRatio) {
+      drawH = boxW / imgRatio;
+    } else {
+      drawW = boxH * imgRatio;
+    }
+    const dx = boxX + (boxW - drawW) / 2;
+    const dy = boxY + (boxH - drawH) / 2;
+    ctx.drawImage(img, dx, dy, drawW, drawH);
+  };
+
+  const renderBoard = () => {
+    const splitX = 920;
+
+    // Left panel: crisp white stadium LED board housing the campaign banner
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, splitX, 256);
+
+    // Right panel: deep midnight stadium LED board housing ISTORE DIGITAL logo
+    ctx.fillStyle = '#09151d';
+    ctx.fillRect(splitX, 0, 1536 - splitX, 256);
+
+    // Top & bottom electric lime LED trim strips
+    ctx.fillStyle = '#d9ff70';
+    ctx.fillRect(0, 0, 1536, 10);
+    ctx.fillRect(0, 246, 1536, 10);
+
+    // Crisp vertical LED seam dividers
+    ctx.fillStyle = '#09151d';
+    ctx.fillRect(0, 10, 6, 236);
+    ctx.fillStyle = '#d9ff70';
+    ctx.fillRect(splitX - 3, 10, 6, 236);
+
+    // Draw uploaded Malayalam campaign banner on left panel
+    if (bannerImg.complete && bannerImg.naturalWidth > 0) {
+      drawContained(bannerImg, 24, 18, splitX - 48, 220);
+    } else {
+      ctx.fillStyle = '#09151d';
+      ctx.font = '800 64px "Barlow Condensed", sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.fillText('iPHONE vs ANDROID', splitX / 2, 130);
+    }
+
+    // Draw uploaded white ISTORE DIGITAL logo on right panel
+    if (istoreImg.complete && istoreImg.naturalWidth > 0) {
+      drawContained(istoreImg, splitX + 36, 22, 1536 - splitX - 72, 212);
+    } else {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '800 56px "Barlow Condensed", sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.fillText('ISTORE DIGITAL', splitX + (1536 - splitX) / 2, 130);
+    }
+
+    texture.needsUpdate = true;
+  };
+
+  renderBoard();
+  bannerImg.onload = renderBoard;
+  istoreImg.onload = renderBoard;
+  bannerImg.src = bannerSrc;
+  istoreImg.src = istoreSrc;
+
   return texture;
 }
 

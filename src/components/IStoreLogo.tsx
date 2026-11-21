@@ -5,6 +5,7 @@ const BASE = rawBase.endsWith('/') ? rawBase : `${rawBase}/`;
 
 export const ISTORE_LOGO_LIGHT_BG = `${BASE}assets/aistudio/istore_logo-01_58027211.png`;
 export const ISTORE_LOGO_DARK_BG = `${BASE}assets/aistudio/istore_logo-02_a6f931c6.png`;
+export const CAMPAIGN_TITLE_GRAPHIC = `${BASE}assets/aistudio/ISTORE_Teaser_Poster-01.jpg_8f30a178.jpeg`;
 
 interface IStoreLogoProps {
   /** 'dark' = dark/green logo for white backgrounds; 'light' = white logo for dark backgrounds */

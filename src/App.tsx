@@ -13,7 +13,7 @@ import { ResultsScreen } from './components/ResultsScreen.tsx';
 import { AdminDashboard } from './components/AdminDashboard.tsx';
 import { QrSharePage } from './components/QrSharePage.tsx';
 import { RulesModal } from './components/RulesModal.tsx';
-import { IStoreLogo, IStoreSplash } from './components/IStoreLogo.tsx';
+import { CAMPAIGN_TITLE_GRAPHIC, IStoreLogo, IStoreSplash } from './components/IStoreLogo.tsx';
 import { ErrorBoundary } from './components/ErrorBoundary.tsx';
 
 type Screen =
@@ -175,10 +175,13 @@ function AppContent() {
               className="flex items-center gap-2.5 shrink-0"
             >
               <IStoreLogo variant="dark" size="sm" />
-              <span className="h-5 w-px bg-slate-200" aria-hidden="true" />
-              <span className="font-[var(--font-display)] text-lg font-extrabold uppercase tracking-tight text-[#0b141a] whitespace-nowrap sm:text-xl">
-                iPhone vs Android
-              </span>
+              <span className="h-6 w-px bg-slate-200" aria-hidden="true" />
+              <img
+                src={CAMPAIGN_TITLE_GRAPHIC}
+                alt="ആപ്പിളോ ആൻഡ്രോയിഡോ? — iPhone vs Android"
+                draggable={false}
+                className="h-9 w-auto object-contain mix-blend-multiply select-none sm:h-11"
+              />
             </button>
 
             <div className="hidden items-center gap-3 shrink-0 sm:flex">

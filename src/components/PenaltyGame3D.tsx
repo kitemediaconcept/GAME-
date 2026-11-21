@@ -27,6 +27,7 @@ import {
   createPitchTexture,
 } from '../lib/jerseyTextures.ts';
 import { createGoalkeeperRig } from '../lib/goalkeeperModel.ts';
+import { createPhoneCrowd } from '../lib/phoneCrowd.ts';
 import {
   DEFAULT_CAMPAIGN_SETTINGS,
   submitShotFirestore,
@@ -495,71 +496,9 @@ export function PenaltyGame3D({
       scene.add(bank);
     });
 
-    const fanSpecs: Array<{
-      x: number;
-      baseY: number;
-      z: number;
-      rotY: number;
-      phase: number;
-      amp: number;
-      color: number;
-    }> = [];
-    const FAN_COLORS = [
-      0xe2e8f0, 0x38bdf8, 0xd9ff70, 0x22c55e, 0x94a3b8, 0xf8fafc, 0x10b981, 0x64748b,
-    ];
-    for (let tier = 0; tier < 5; tier++) {
-      const y = 2.55 + tier * 1.85;
-      const z = -20.5 - tier * 2.1;
-      for (let i = 0; i < 64; i++) {
-        fanSpecs.push({
-          x: -25 + i * 0.79,
-          baseY: y,
-          z,
-          rotY: 0,
-          phase: Math.random() * Math.PI * 2,
-          amp: 0.05 + Math.random() * 0.06,
-          color: FAN_COLORS[Math.floor(Math.random() * FAN_COLORS.length)],
-        });
-      }
-    }
-    for (let side = -1; side <= 1; side += 2) {
-      for (let tier = 0; tier < 3; tier++) {
-        const x = side * (26.7 + tier * 2.1);
-        const y = 2.55 + tier * 1.85;
-        for (let i = 0; i < 42; i++) {
-          fanSpecs.push({
-            x,
-            baseY: y,
-            z: 8 - i * 0.9,
-            rotY: Math.PI / 2,
-            phase: Math.random() * Math.PI * 2,
-            amp: 0.04 + Math.random() * 0.05,
-            color: FAN_COLORS[Math.floor(Math.random() * FAN_COLORS.length)],
-          });
-        }
-      }
-    }
-
-    const fanInstanced = new THREE.InstancedMesh(
-      new THREE.BoxGeometry(0.46, 0.72, 0.2),
-      new THREE.MeshLambertMaterial({ color: 0xffffff }),
-      fanSpecs.length
-    );
-    fanInstanced.frustumCulled = false;
-    const _dummy = new THREE.Object3D();
-    const _tmpColor = new THREE.Color();
-    fanSpecs.forEach((f, idx) => {
-      _dummy.position.set(f.x, f.baseY, f.z);
-      _dummy.rotation.set(0, f.rotY, 0);
-      _dummy.scale.setScalar(0.9 + (idx % 5) * 0.04);
-      _dummy.updateMatrix();
-      fanInstanced.setMatrixAt(idx, _dummy.matrix);
-      _tmpColor.setHex(f.color);
-      fanInstanced.setColorAt(idx, _tmpColor);
-    });
-    fanInstanced.instanceMatrix.needsUpdate = true;
-    if (fanInstanced.instanceColor) fanInstanced.instanceColor.needsUpdate = true;
-    scene.add(fanInstanced);
+    // Animated iPhone vs Android Smartphone Audience Gallery
+    const phoneCrowd = createPhoneCrowd(maxAniso);
+    scene.add(phoneCrowd.group);
 
     // ─── SOCCER BALL + CONTACT SHADOW + STRIKE SHOCKWAVE RING ─
     const ball = new THREE.Group();
@@ -1715,20 +1654,9 @@ export function PenaltyGame3D({
       const dt = Math.min(0.05, clock.getDelta());
       elapsed += dt;
 
-      // 1. Crowd wave & goal cheer animation
+      // 1. Smartphone crowd wave & goal cheer animation
       if (cheerBoost > 0) cheerBoost = Math.max(0, cheerBoost - dt * 1.35);
-      const cheerMult = 1 + cheerBoost * 2.5;
-      for (let i = 0; i < fanSpecs.length; i++) {
-        const f = fanSpecs[i];
-        const wave = Math.sin(elapsed * 2.6 + f.phase + f.x * 0.14);
-        const y = f.baseY + wave * f.amp * cheerMult;
-        _dummy.position.set(f.x, y, f.z);
-        _dummy.rotation.set(0, f.rotY, 0);
-        _dummy.scale.setScalar(0.9 + (i % 5) * 0.04);
-        _dummy.updateMatrix();
-        fanInstanced.setMatrixAt(i, _dummy.matrix);
-      }
-      fanInstanced.instanceMatrix.needsUpdate = true;
+      phoneCrowd.update(elapsed, cheerBoost);
 
       // 2. Pulsing Drimify corner targets
       const targetPulse = 1 + Math.sin(elapsed * 3.8) * 0.07;
@@ -1858,6 +1786,7 @@ export function PenaltyGame3D({
       backNetMat.dispose();
       sideNetMat.dispose();
       topNetMat.dispose();
+      phoneCrowd.dispose();
       goalieRig.dispose();
       envTarget.dispose();
       renderer.dispose();
