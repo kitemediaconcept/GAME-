@@ -168,19 +168,22 @@ function AppContent() {
       {/* Clean Mobile-Friendly Player Header with iStore Logo (NO Admin, NO Dashboard) */}
       {!isInArena && (
         <header className="sticky top-0 z-30 border-b border-slate-200/90 bg-white/95 backdrop-blur-md">
-          <div className="mx-auto flex h-15 max-w-5xl items-center justify-center gap-3 px-4 sm:justify-between sm:px-6 lg:px-8">
+          <div className="mx-auto flex h-20 max-w-5xl items-center justify-center gap-3 px-3 sm:h-24 sm:justify-between sm:px-6 lg:px-8">
             <button
               type="button"
               onClick={() => setScreen('home')}
-              className="flex items-center gap-2.5 shrink-0"
+              className="flex max-w-full items-center gap-2 sm:gap-3.5 shrink-0"
             >
-              <IStoreLogo variant="dark" size="sm" />
-              <span className="h-6 w-px bg-slate-200" aria-hidden="true" />
+              <IStoreLogo
+                variant="dark"
+                className="h-14 sm:h-16 md:h-[70px]"
+              />
+              <span className="h-9 w-px shrink-0 bg-slate-200 sm:h-11" aria-hidden="true" />
               <img
                 src={CAMPAIGN_TITLE_GRAPHIC}
                 alt="ആപ്പിളോ ആൻഡ്രോയിഡോ? — iPhone vs Android"
                 draggable={false}
-                className="h-9 w-auto object-contain mix-blend-multiply select-none sm:h-11"
+                className="h-16 w-auto max-w-[52vw] object-contain mix-blend-multiply select-none sm:h-20 sm:max-w-none"
               />
             </button>
 

@@ -12,6 +12,7 @@ interface IStoreLogoProps {
   variant?: 'dark' | 'light';
   size?: 'sm' | 'md' | 'lg';
   logoImageUrl?: string;
+  className?: string;
 }
 
 /**
@@ -21,6 +22,7 @@ export function IStoreLogo({
   variant = 'dark',
   size = 'md',
   logoImageUrl,
+  className,
 }: IStoreLogoProps) {
   const src =
     logoImageUrl ||
@@ -38,7 +40,7 @@ export function IStoreLogo({
       src={src}
       alt="ISTORE DIGITAL"
       draggable={false}
-      className={`${heightClass} w-auto object-contain select-none`}
+      className={`${className || heightClass} w-auto object-contain select-none`}
     />
   );
 }

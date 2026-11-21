@@ -1,4 +1,4 @@
-import { X, ShieldCheck, Calendar, Award, Scale } from 'lucide-react';
+import { X, ShieldCheck, Award, Scale } from 'lucide-react';
 import type { CampaignSettings } from '../types.ts';
 
 interface RulesModalProps {
@@ -55,26 +55,15 @@ export function RulesModal({ settings, onClose }: RulesModalProps) {
         </div>
 
         <div className="mt-6 space-y-6 text-sm leading-relaxed text-slate-700">
-          {/* Schedule & Qualification */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl bg-[#f4f6f5] p-4">
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                <Calendar className="h-4 w-4 text-slate-700" />
-                <span>Campaign Dates</span>
-              </div>
-              <p className="mt-1.5 font-mono text-sm font-semibold text-[#0b141a] tabular-nums">
-                {settings.startDate} to {settings.endDate}
-              </p>
+          {/* Qualification */}
+          <div className="rounded-2xl bg-[#f4f6f5] p-4">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+              <Award className="h-4 w-4 text-slate-700" />
+              <span>Qualification Threshold</span>
             </div>
-            <div className="rounded-2xl bg-[#f4f6f5] p-4">
-              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                <Award className="h-4 w-4 text-slate-700" />
-                <span>Qualification Threshold</span>
-              </div>
-              <p className="mt-1.5 font-mono text-sm font-semibold text-[#0b141a] tabular-nums">
-                {settings.qualificationThreshold} / {settings.totalAttempts} goals or higher
-              </p>
-            </div>
+            <p className="mt-1.5 font-mono text-sm font-semibold text-[#0b141a] tabular-nums">
+              {settings.qualificationThreshold} / {settings.totalAttempts} goals or higher
+            </p>
           </div>
 
           {/* Fairness & Participation Policy */}

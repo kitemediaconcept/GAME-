@@ -88,7 +88,7 @@ export function ResultsScreen({
             </div>
             <p className="mt-1 text-xs leading-relaxed text-slate-600">
               {qualified
-                ? `Winners will be selected and contacted via phone after ${settings.endDate}.`
+                ? 'Winners will be selected and contacted via phone once the giveaway closes.'
                 : 'Your official attempt has been recorded. Thank you for participating!'}
             </p>
           </div>

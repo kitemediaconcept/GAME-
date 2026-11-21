@@ -42,9 +42,6 @@ export function CampaignHome({
 
             <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-xs font-medium text-slate-200 sm:bottom-6 sm:left-6">
               <span>{settings.title}</span>
-              <span className="font-mono tabular-nums text-[#d9ff70]">
-                {settings.startDate} – {settings.endDate}
-              </span>
             </div>
           </div>
 
