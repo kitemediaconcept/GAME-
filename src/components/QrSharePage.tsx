@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import QRCode from 'qrcode';
 import { Download, Copy, Check, Share2, QrCode, Smartphone, ExternalLink } from 'lucide-react';
 import { getFullAppUrls } from '../lib/routing.ts';
+import { IStoreLogo } from './IStoreLogo.tsx';
 
 interface QrCodeStudioProps {
   compact?: boolean;
@@ -168,6 +169,9 @@ export function QrCodeStudio({ compact = false, onOpenGame }: QrCodeStudioProps)
       {/* Visual Scannable QR Card */}
       <div className="lg:col-span-5">
         <div className="overflow-hidden rounded-[28px] bg-[#081722] p-6 text-center text-white shadow-sm">
+          <div className="mb-2 flex justify-center">
+            <IStoreLogo variant="light" size="sm" />
+          </div>
           <div className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-[#d9ff70]">
             <QrCode className="h-3.5 w-3.5" />
             <span>Scan to Open Mobile Game</span>
