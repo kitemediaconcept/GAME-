@@ -520,28 +520,40 @@ export async function adminPickRandomGiveawayWinners(
   const chosen = shuffled.slice(0, Math.min(count, shuffled.length));
   const chosenIds = new Set(chosen.map((c) => c.id));
 
-  const batch = writeBatch(db);
+  const updates: Array<{ id: string; data: Record<string, unknown> }> = [];
   for (const p of participants) {
     if (p.winnerStatus === 'confirmed') continue;
     if (chosenIds.has(p.id)) {
-      batch.update(doc(db, 'participants', p.id), {
-        winnerStatus: 'proposed',
-        overrideNote: 'Selected via Giveaway Random Draw',
-        winnerConfirmedAt: '',
-        updatedAt: serverTimestamp(),
+      updates.push({
+        id: p.id,
+        data: {
+          winnerStatus: 'proposed',
+          overrideNote: 'Selected via Giveaway Random Draw',
+          winnerConfirmedAt: '',
+          updatedAt: serverTimestamp(),
+        },
       });
     } else if (p.winnerStatus === 'proposed') {
-      batch.update(doc(db, 'participants', p.id), {
-        winnerStatus: 'none',
-        overrideNote: '',
-        winnerConfirmedAt: '',
-        updatedAt: serverTimestamp(),
+      updates.push({
+        id: p.id,
+        data: {
+          winnerStatus: 'none',
+          overrideNote: '',
+          winnerConfirmedAt: '',
+          updatedAt: serverTimestamp(),
+        },
       });
     }
   }
 
   try {
-    await batch.commit();
+    for (let i = 0; i < updates.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const u of updates.slice(i, i + 400)) {
+        batch.update(doc(db, 'participants', u.id), u.data);
+      }
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'participants');
   }
@@ -569,28 +581,40 @@ export async function adminProposeTopScoreWinners(
     throw new Error('No qualified participants available yet.');
   }
 
-  const batch = writeBatch(db);
+  const updates: Array<{ id: string; data: Record<string, unknown> }> = [];
   for (const p of participants) {
     if (p.winnerStatus === 'confirmed') continue;
     if (selectedIds.has(p.id)) {
-      batch.update(doc(db, 'participants', p.id), {
-        winnerStatus: 'proposed',
-        overrideNote: 'Top score provisional selection',
-        winnerConfirmedAt: '',
-        updatedAt: serverTimestamp(),
+      updates.push({
+        id: p.id,
+        data: {
+          winnerStatus: 'proposed',
+          overrideNote: 'Top score provisional selection',
+          winnerConfirmedAt: '',
+          updatedAt: serverTimestamp(),
+        },
       });
     } else if (p.winnerStatus === 'proposed') {
-      batch.update(doc(db, 'participants', p.id), {
-        winnerStatus: 'none',
-        overrideNote: '',
-        winnerConfirmedAt: '',
-        updatedAt: serverTimestamp(),
+      updates.push({
+        id: p.id,
+        data: {
+          winnerStatus: 'none',
+          overrideNote: '',
+          winnerConfirmedAt: '',
+          updatedAt: serverTimestamp(),
+        },
       });
     }
   }
 
   try {
-    await batch.commit();
+    for (let i = 0; i < updates.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const u of updates.slice(i, i + 400)) {
+        batch.update(doc(db, 'participants', u.id), u.data);
+      }
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'participants');
   }
@@ -616,17 +640,18 @@ export async function adminConfirmProvisionalWinners(
   }
 
   const nowIso = new Date().toISOString();
-  const batch = writeBatch(db);
-  for (const p of proposed) {
-    batch.update(doc(db, 'participants', p.id), {
-      winnerStatus: 'confirmed',
-      winnerConfirmedAt: nowIso,
-      updatedAt: serverTimestamp(),
-    });
-  }
-
   try {
-    await batch.commit();
+    for (let i = 0; i < proposed.length; i += 400) {
+      const batch = writeBatch(db);
+      for (const p of proposed.slice(i, i + 400)) {
+        batch.update(doc(db, 'participants', p.id), {
+          winnerStatus: 'confirmed',
+          winnerConfirmedAt: nowIso,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'participants');
   }
@@ -769,7 +794,7 @@ export function buildGiveawayExportText(
 }
 
 export function downloadGiveawayCsvFile(rows: ParticipantRecord[], filenamePrefix: string) {
-  const csv = buildGiveawayExportText(rows, 'csv');
+  const csv = `\uFEFF${buildGiveawayExportText(rows, 'csv')}`;
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -779,4 +804,39 @@ export function downloadGiveawayCsvFile(rows: ParticipantRecord[], filenamePrefi
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Shares the Name,Phone CSV file directly via native Share Sheet (WhatsApp, Email, Telegram, etc.)
+ * and gracefully falls back to instant CSV download on browsers without file-share support.
+ */
+export async function shareGiveawayCsvFile(
+  rows: ParticipantRecord[],
+  filenamePrefix: string
+): Promise<'shared' | 'downloaded'> {
+  const csv = `\uFEFF${buildGiveawayExportText(rows, 'csv')}`;
+  const fileName = `${filenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+  if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
+    try {
+      const file = new File([blob], fileName, { type: 'text/csv' });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          title: 'Qualified Giveaway Participants (Name & Phone)',
+          text: `${rows.length} qualified entries (Name & Phone CSV).`,
+          files: [file],
+        });
+        return 'shared';
+      }
+    } catch (err) {
+      // If user dismissed share sheet, do not force a fallback download
+      if (err instanceof Error && err.name === 'AbortError') {
+        return 'shared';
+      }
+    }
+  }
+
+  downloadGiveawayCsvFile(rows, filenamePrefix);
+  return 'downloaded';
 }

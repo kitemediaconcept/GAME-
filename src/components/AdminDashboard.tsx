@@ -18,6 +18,7 @@ import {
   Trash2,
   Lock,
   Phone,
+  Share2,
 } from 'lucide-react';
 import type {
   AuditLogEntry,
@@ -44,6 +45,7 @@ import {
   downloadGiveawayCsvFile,
   fetchCampaignSettingsFirestore,
   rankParticipantsList,
+  shareGiveawayCsvFile,
   subscribeAdminAuditLogs,
   subscribeAdminParticipants,
   type GiveawayExportFormat,
@@ -73,8 +75,9 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
   // Filters
   const [search, setSearch] = useState('');
   const [teamFilter, setTeamFilter] = useState<'all' | 'iphone' | 'android'>('all');
-  const [qualFilter, setQualFilter] = useState<'all' | 'qualified' | 'not_qualified'>('all');
+  const [qualFilter, setQualFilter] = useState<'all' | 'qualified' | 'not_qualified'>('qualified');
   const [winnerFilter, setWinnerFilter] = useState<'all' | 'proposed' | 'confirmed' | 'none'>('all');
+  const [visibleLimit, setVisibleLimit] = useState(100);
 
   // Giveaway export & draw state
   const [exportScope, setExportScope] = useState<'qualified' | 'all' | 'winners'>('qualified');
@@ -465,6 +468,27 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
+                onClick={async () => {
+                  const qualifiedRows = rankedParticipants.filter((p) => p.qualified);
+                  const mode = await shareGiveawayCsvFile(
+                    qualifiedRows,
+                    'giveaway-qualified-name-phone'
+                  );
+                  if (mode === 'downloaded') {
+                    setBannerMsg({
+                      type: 'ok',
+                      text: `Downloaded ${qualifiedRows.length} qualified entries (Name, Phone) as CSV ready to share.`,
+                    });
+                  }
+                }}
+                disabled={stats.qualifiedParticipants === 0}
+                className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[#d9ff70] px-3.5 py-2 text-xs font-extrabold text-[#081722] hover:bg-[#e5ff99] disabled:opacity-50 whitespace-nowrap"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                <span>Share Qualified CSV ({stats.qualifiedParticipants})</span>
+              </button>
+              <button
+                type="button"
                 onClick={() =>
                   downloadGiveawayCsvFile(
                     rankedParticipants.filter((p) => p.qualified),
@@ -475,7 +499,7 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
                 className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl bg-[#090d11] px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50 whitespace-nowrap"
               >
                 <Download className="h-3.5 w-3.5 text-[#d9ff70]" />
-                <span>Download Qualified CSV (Name, Phone)</span>
+                <span>Download Qualified CSV</span>
               </button>
             </div>
           </div>
@@ -655,7 +679,7 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {filteredParticipants.map((p) => (
+                      {filteredParticipants.slice(0, visibleLimit).map((p) => (
                         <tr key={p.id} className="hover:bg-slate-50/80">
                           <td className="px-4 py-3 whitespace-nowrap">
                             <button
@@ -735,6 +759,21 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
                     </tbody>
                   </table>
                 </div>
+                {filteredParticipants.length > visibleLimit && (
+                  <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/70 px-4 py-3 text-xs text-slate-600">
+                    <span>
+                      Showing {Math.min(visibleLimit, filteredParticipants.length)} of{' '}
+                      {filteredParticipants.length} entries (CSV export always includes all rows)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setVisibleLimit((v) => v + 100)}
+                      className="rounded-lg bg-[#090d11] px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+                    >
+                      Load 100 More
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -821,6 +860,27 @@ export function AdminDashboard({ onCampaignMutated }: AdminDashboardProps) {
                         <span>Copy for Giveaway App ({exportRows.length})</span>
                       </>
                     )}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={exportRows.length === 0}
+                    onClick={async () => {
+                      const mode = await shareGiveawayCsvFile(
+                        exportRows,
+                        `giveaway-${exportScope}-name-phone`
+                      );
+                      if (mode === 'downloaded') {
+                        setBannerMsg({
+                          type: 'ok',
+                          text: `Downloaded ${exportRows.length} entries as CSV ready to share.`,
+                        });
+                      }
+                    }}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-[#d9ff70] px-4 py-2.5 text-xs font-extrabold text-[#081722] hover:bg-[#e5ff99] disabled:opacity-50"
+                  >
+                    <Share2 className="h-4 w-4" />
+                    <span>Share CSV File ({exportRows.length})</span>
                   </button>
 
                   <button
