@@ -168,7 +168,7 @@ function AppContent() {
       {/* Clean Mobile-Friendly Player Header with iStore Logo (NO Admin, NO Dashboard) */}
       {!isInArena && (
         <header className="sticky top-0 z-30 border-b border-slate-200/90 bg-white/95 backdrop-blur-md">
-          <div className="mx-auto flex h-15 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+          <div className="mx-auto flex h-15 max-w-5xl items-center justify-center gap-3 px-4 sm:justify-between sm:px-6 lg:px-8">
             <button
               type="button"
               onClick={() => setScreen('home')}
@@ -181,7 +181,7 @@ function AppContent() {
               </span>
             </button>
 
-            <div className="flex items-center gap-3 shrink-0">
+            <div className="hidden items-center gap-3 shrink-0 sm:flex">
               <button
                 type="button"
                 onClick={() => setShowRules(true)}
